@@ -73,7 +73,7 @@ This milestone is complete only when all are true:
 Produces:
 - `corrections.ts` — `writeCorrection(entry)`, `readCorrections(filters)`, `rotateCorrections(threshold)` functions
 - `correction-types.ts` — `CorrectionEntry` interface with 14-category taxonomy, scope enum, JSONL schema
-- `correction-detector.ts` — `detectCorrectionsFromSession(sessionData)` for programmatic detection from activity logs/retries
+- `correction-detector.ts` — `detectCorrections(session: DetectionSession)` for programmatic detection from activity logs/retries
 - Self-report prompt instructions embedded in dispatch templates
 
 Consumes:
