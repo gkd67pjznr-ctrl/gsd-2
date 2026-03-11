@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { gsdRoot } from "./paths.js";
+import type { GateEvent } from "./quality-gating.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ export interface UnitMetrics {
   toolCalls: number;
   assistantMessages: number;
   userMessages: number;
+  gateEvents?: GateEvent[];
 }
 
 export interface MetricsLedger {

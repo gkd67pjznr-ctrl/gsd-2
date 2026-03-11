@@ -4,7 +4,7 @@
 
 GSD 2 (Get Shit Done) is a standalone TypeScript CLI built on the Pi SDK that structures AI-assisted coding into milestones → slices → tasks, with programmatic session management, auto mode, crash recovery, cost tracking, and clean git strategy. It's a complete rewrite of the original GSD prompt framework.
 
-Currently, gsd2 manages the planning/execution lifecycle well but lacks three capabilities that were developed in a parallel fork (gsdup): an observation and learning loop that captures user corrections and promotes them to durable preferences and skill refinements, a quality gating system that enforces codebase scanning/library lookup/testing at configurable levels, and a tech debt tracking system for noting code issues discovered during work.
+Currently, gsd2 manages the planning/execution lifecycle well and has implemented four of five adaptive intelligence capabilities from the gsdup fork: correction capture, preference engine, learning loop closure, and quality gating. The remaining capability — tech debt tracking for noting code issues discovered during work — is next.
 
 ## Core Value
 
@@ -26,6 +26,7 @@ The auto-mode state machine that drives fresh-context-per-task execution through
 - **Correction capture foundation** (M001/S01): 14-category diagnosis taxonomy, JSONL persistence with rotation, programmatic detection from session traces, self-report instructions in dispatch prompts, kill switch via preferences
 - **Preference engine** (M001/S02): Automatic promotion of repeated corrections to preferences with confidence scoring, observer engine with cross-scope pattern analysis and bounded guardrails, suggestion generation for skill refinement, wired into auto-mode execution loop
 - **Learning loop closure** (M001/S03): Dynamic recall injection of past corrections and preferences into dispatch prompts (token-budgeted, deduplicated, 10-slot max), correction/preference retirement via retireByCategory(), cross-project preference promotion to `~/.gsd/preferences.json` at 3+ project threshold
+- **Quality gating** (M001/S04): Configurable quality level (fast/standard/strict) on GSDPreferences, prompt injection of codebase scan/Context7/test/diff instructions via `{{quality}}` template variable, gate event recording with 5 gates × 4 outcomes persisted on UnitMetrics, dashboard overlay quality summary section
 
 ## Architecture / Key Patterns
 

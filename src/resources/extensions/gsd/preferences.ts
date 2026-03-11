@@ -31,6 +31,8 @@ export interface AutoSupervisorConfig {
   hard_timeout_minutes?: number;
 }
 
+export type QualityLevelPref = "fast" | "standard" | "strict";
+
 export interface GSDPreferences {
   version?: number;
   always_use_skills?: string[];
@@ -44,6 +46,7 @@ export interface GSDPreferences {
   uat_dispatch?: boolean;
   budget_ceiling?: number;
   correction_capture?: boolean;
+  quality_level?: QualityLevelPref;
 }
 
 export interface LoadedGSDPreferences {
@@ -497,6 +500,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     uat_dispatch: override.uat_dispatch ?? base.uat_dispatch,
     budget_ceiling: override.budget_ceiling ?? base.budget_ceiling,
     correction_capture: override.correction_capture ?? base.correction_capture,
+    quality_level: override.quality_level ?? base.quality_level,
   };
 }
 
@@ -567,6 +571,15 @@ function validatePreferences(preferences: GSDPreferences): {
 
   if (preferences.uat_dispatch !== undefined) {
     validated.uat_dispatch = !!preferences.uat_dispatch;
+  }
+
+  const validQualityLevels = new Set(["fast", "standard", "strict"]);
+  if (preferences.quality_level) {
+    if (validQualityLevels.has(preferences.quality_level)) {
+      validated.quality_level = preferences.quality_level;
+    } else {
+      errors.push(`invalid quality_level value: ${preferences.quality_level}`);
+    }
   }
 
   if (preferences.budget_ceiling !== undefined) {

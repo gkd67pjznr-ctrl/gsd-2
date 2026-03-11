@@ -1,25 +1,26 @@
 # GSD State
 
 **Active Milestone:** M001 — Adaptive Intelligence
-**Active Slice:** S03 — Learning Loop Closure (complete)
-**Phase:** executing
+**Active Slice:** S04 — Quality Gating (complete)
+**Phase:** slice-complete
 
 ## Recent Decisions
-- D025: Recall block embeds self-report instructions in same {{corrections}} variable
-- D026: Token estimation formula (words / 0.75, max 3000)
-- D027: GSD_HOME env var for user-level preferences test isolation
-- D028: Cross-project promotion triggered from checkAndPromote
+- D029: Quality instruction content uses concrete tool names
+- D030: Single {{quality}} template variable for pre+post instructions
+- D031: Gate events flushed at central post-completion point
+- D032: Dashboard quality section via exported helper functions
 
 ## Completed
 - S01: Correction Capture Foundation — 4 tasks, 133 test assertions, all verification passing
 - S02: Preference Engine — 4 tasks, 93 test assertions, all verification passing
 - S03: Learning Loop Closure — 4 tasks, 165 test assertions, all verification passing
+- S04: Quality Gating — 3 tasks, 161 test assertions (59 core + 54 integration + 48 existing), all verification passing
 
 ## In Progress
-- None — S03 complete, awaiting S04 start
+- None
 
 ## Blockers
 - None
 
 ## Next Action
-Reassess roadmap and begin S04 (Quality Gating)
+Reassess roadmap → begin S05 (Tech Debt & Passive Monitoring)

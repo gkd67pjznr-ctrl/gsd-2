@@ -111,8 +111,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S04
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Stored in `.gsd/preferences.md` as quality_level field. Extends existing preferences system
+- Validation: validated — 28 integration test assertions prove quality_level on GSDPreferences: validation accepts valid/rejects invalid values, merge semantics work correctly, resolveQualityLevel() reads from preferences and defaults to fast on missing/invalid/error (S04)
+- Notes: Stored in `.gsd/preferences.md` as quality_level field. Extends existing preferences system. Implemented as QualityLevelPref type with validation following skill_discovery pattern.
 
 ### R011 — Quality Sentinel in Dispatch Prompts
 - Class: core-capability
@@ -122,8 +122,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S04
 - Supporting slices: none
-- Validation: unmapped
-- Notes: This is architecturally superior to gsdup's approach because gsd2 programmatically controls dispatch prompts
+- Validation: validated — 59 core test assertions prove buildQualityInstructions() returns empty for fast, bounded content for standard (~130 tokens) and strict (~200 tokens) with correct gate keywords (codebase_scan, context7_lookup, diff_review, test_baseline, test_gate); integration tests prove {{quality}} template substitution works in execute-task.md via auto.ts buildQualityVar() (S04)
+- Notes: This is architecturally superior to gsdup's approach because gsd2 programmatically controls dispatch prompts. Instructions use concrete tool names (rg, find, resolve_library, git diff).
 
 ### R012 — Quality Gate Metrics
 - Class: quality-attribute
@@ -133,8 +133,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S04
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Extends existing metrics.ts ledger, not a separate JSONL file
+- Validation: validated — test assertions prove GateEvent creation/validation against 5 gate names and 4 outcomes, recording/retrieval with copy-on-read safety, gateEvents round-trip through metrics.json on UnitMetrics, dashboard aggregation via aggregateGateOutcomes() and formatted rendering via formatGateSummaryLine() with correct counts and absent section when no events exist (S04)
+- Notes: Extends existing metrics.ts ledger, not a separate JSONL file. Gate events flushed at central post-completion point in auto.ts.
 
 ### R013 — Tech Debt Register
 - Class: core-capability
@@ -230,9 +230,9 @@ This file is the explicit capability and coverage contract for the project.
 | R007 | core-capability | active | M001/S03 | none | validated (S03) |
 | R008 | core-capability | active | M001/S03 | none | validated (S03) |
 | R009 | differentiator | active | M001/S03 | none | validated (S03) |
-| R010 | core-capability | active | M001/S04 | none | unmapped |
-| R011 | core-capability | active | M001/S04 | none | unmapped |
-| R012 | quality-attribute | active | M001/S04 | none | unmapped |
+| R010 | core-capability | active | M001/S04 | none | validated (S04) |
+| R011 | core-capability | active | M001/S04 | none | validated (S04) |
+| R012 | quality-attribute | active | M001/S04 | none | validated (S04) |
 | R013 | core-capability | active | M001/S05 | none | unmapped |
 | R014 | quality-attribute | active | M001/S05 | M001/S04 | unmapped |
 | R015 | quality-attribute | active | M001/S05 | M001/S01 | unmapped |
@@ -245,6 +245,6 @@ This file is the explicit capability and coverage contract for the project.
 
 - Active requirements: 15
 - Mapped to slices: 15
-- Validated: 7 (R002, R003, R004, R005, R007, R008, R009)
+- Validated: 10 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012)
 - Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven, user confirmation and permission checks pending)
 - Unmapped active requirements: 0

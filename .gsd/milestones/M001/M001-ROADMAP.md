@@ -60,7 +60,7 @@ This milestone is complete only when all are true:
 - [x] **S03: Learning Loop Closure** `risk:medium` `depends:[S02]`
   > After this: dispatch prompts include relevant past corrections filtered by context, skill refinement retires source corrections, and preferences appearing in 3+ projects promote to user-level.
 
-- [ ] **S04: Quality Gating** `risk:low` `depends:[]`
+- [x] **S04: Quality Gating** `risk:low` `depends:[]`
   > After this: setting quality level to `standard` or `strict` via `/gsd prefs` injects codebase scan, Context7 lookup, and test mandates into dispatch prompts, with gate outcomes recorded in the metrics ledger and visible in the dashboard.
 
 - [ ] **S05: Tech Debt & Passive Monitoring** `risk:low` `depends:[S01, S04]`

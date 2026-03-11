@@ -72,6 +72,12 @@ import { writeCorrection } from "./corrections.ts";
 import type { CorrectionEntry } from "./correction-types.ts";
 import { checkAndPromote } from "./pattern-preferences.ts";
 import { analyzePatterns } from "./observer.ts";
+import {
+  resolveQualityLevel,
+  buildQualityInstructions,
+  getGateEvents,
+  clearGateEvents,
+} from "./quality-gating.ts";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -878,8 +884,15 @@ async function dispatchNextUnit(
   // The session still holds the previous unit's data (newSession hasn't fired yet).
   if (currentUnit) {
     const modelId = ctx.model?.id ?? "unknown";
-    snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+    const unitRecord = snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
     saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+
+    // Flush quality gate events to the unit metrics record
+    const pendingGates = getGateEvents();
+    if (unitRecord && pendingGates.length > 0) {
+      unitRecord.gateEvents = pendingGates;
+    }
+    clearGateEvents();
 
     // Programmatic correction detection — analyze the session for retries, stuck loops, etc.
     emitProgrammaticCorrections(ctx, currentUnit.type, currentUnit.id);
@@ -1130,6 +1143,11 @@ const SELF_REPORT_INSTRUCTIONS = `
  */
 function buildCorrectionsVar(): string {
   return buildRecallBlock();
+}
+
+function buildQualityVar(): string {
+  const level = resolveQualityLevel();
+  return buildQualityInstructions(level);
 }
 
 /**
@@ -1540,6 +1558,7 @@ async function buildExecuteTaskPrompt(
     priorTaskLines: priorLines,
     taskSummaryAbsPath,
     corrections: buildCorrectionsVar(),
+    quality: buildQualityVar(),
   });
 }
 

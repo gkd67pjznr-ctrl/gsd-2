@@ -8,6 +8,8 @@ Start with the inlined context below. Treat the inlined task plan as the authori
 
 {{carryForwardSection}}
 
+{{quality}}
+
 {{taskPlanInline}}
 
 {{slicePlanExcerpt}}

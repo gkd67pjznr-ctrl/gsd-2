@@ -18,6 +18,8 @@ import {
 } from "./metrics.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { getActiveWorktreeName } from "./worktree-command.js";
+import { resolveQualityLevel } from "./quality-gating.js";
+import type { GateOutcome } from "./quality-gating.js";
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -452,6 +454,37 @@ export class GSDDashboardOverlay {
       lines.push(row(`${th.fg("dim", "avg/unit:")} ${th.fg("text", formatCost(totals.cost / totals.units))}  ${th.fg("dim", "·")}  ${th.fg("text", formatTokenCount(Math.round(totals.tokens.total / totals.units)))} tokens`));
     }
 
+    // ─── Quality Gates Section ──────────────────────────────────────────
+    // Show quality gate summary when any unit in the ledger has gate events
+    if (ledger && ledger.units.length > 0) {
+      const gateCounts = aggregateGateOutcomes(ledger.units);
+
+      if (gateCounts) {
+        lines.push(blank());
+        lines.push(hr());
+        lines.push(row(th.fg("text", th.bold("Quality Gates"))));
+        lines.push(blank());
+
+        const level = resolveQualityLevel();
+
+        // Build outcome parts with theme colors — omit zero-count outcomes
+        const outcomeParts: string[] = [];
+        const outcomeOrder: GateOutcome[] = ["passed", "warned", "skipped", "blocked"];
+        for (const outcome of outcomeOrder) {
+          const count = gateCounts[outcome];
+          if (count > 0) {
+            const color = outcome === "passed" ? "success"
+              : outcome === "skipped" ? "dim"
+              : "warning";
+            outcomeParts.push(th.fg(color, `${count} ${outcome}`));
+          }
+        }
+
+        const summaryLine = `Quality: ${level}` + (outcomeParts.length > 0 ? `  ${th.fg("dim", "·")}  ${outcomeParts.join(th.fg("dim", ", "))}` : "");
+        lines.push(row(summaryLine));
+      }
+    }
+
     lines.push(blank());
     lines.push(hr());
     lines.push(centered(th.fg("dim", "↑↓ scroll · g/G top/end · esc close")));
@@ -488,6 +521,58 @@ export class GSDDashboardOverlay {
   dispose(): void {
     clearInterval(this.refreshTimer);
   }
+}
+
+// ─── Exported helpers for testing ──────────────────────────────────────────
+
+export interface GateOutcomeCounts {
+  passed: number;
+  warned: number;
+  skipped: number;
+  blocked: number;
+  total: number;
+}
+
+/**
+ * Aggregate gate outcome counts from all units in a metrics ledger.
+ * Returns null if no gate events exist (section should be hidden).
+ *
+ * Exported for testing — used internally by the dashboard overlay.
+ */
+export function aggregateGateOutcomes(units: import("./metrics.js").UnitMetrics[]): GateOutcomeCounts | null {
+  let total = 0;
+  const counts: GateOutcomeCounts = { passed: 0, warned: 0, skipped: 0, blocked: 0, total: 0 };
+
+  for (const unit of units) {
+    if (unit.gateEvents && unit.gateEvents.length > 0) {
+      for (const ev of unit.gateEvents) {
+        total++;
+        if (ev.outcome === "passed") counts.passed++;
+        else if (ev.outcome === "warned") counts.warned++;
+        else if (ev.outcome === "skipped") counts.skipped++;
+        else if (ev.outcome === "blocked") counts.blocked++;
+      }
+    }
+  }
+
+  if (total === 0) return null;
+  counts.total = total;
+  return counts;
+}
+
+/**
+ * Format the quality gate summary line for the dashboard.
+ * Returns the text content (without theme colors) for testing.
+ *
+ * Exported for testing — used internally by the dashboard overlay.
+ */
+export function formatGateSummaryLine(level: string, counts: GateOutcomeCounts): string {
+  const parts: string[] = [];
+  if (counts.passed > 0) parts.push(`${counts.passed} passed`);
+  if (counts.warned > 0) parts.push(`${counts.warned} warned`);
+  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
+  if (counts.blocked > 0) parts.push(`${counts.blocked} blocked`);
+  return `Quality: ${level}` + (parts.length > 0 ? ` · ${parts.join(", ")}` : "");
 }
 
 interface MilestoneView {
