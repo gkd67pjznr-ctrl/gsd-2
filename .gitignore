@@ -1,6 +1,13 @@
 
-# ── GSD (user project artifacts — never commit) ──
-.gsd/
+# ── GSD (user project artifacts — selective commit) ──
+# Allow .gsd/ planning artifacts, ignore runtime/ephemeral files
+!.gsd/
+.gsd/activity/
+.gsd/runtime/
+.gsd/worktrees/
+.gsd/auto.lock
+.gsd/metrics.json
+.gsd/patterns/
 .DS_Store
 Thumbs.db
 *.swp
@@ -34,3 +41,6 @@ dist/
 .gsd*.tgz
 .artifacts/
 AGENTS.md
+
+# ── GSD ephemeral state ──
+.gsd/STATE.md
