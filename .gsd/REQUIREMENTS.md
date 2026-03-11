@@ -45,7 +45,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S02
 - Supporting slices: none
-- Validation: unmapped
+- Validation: validated — 53 test assertions prove promotion at/below threshold, confidence formula (count/(count+2)), upsert create/update semantics, atomic writes, and structured failure reporting (S02)
 - Notes: Confidence formula: count/(count+2). Preferences stored in `.gsd/patterns/preferences.jsonl`
 
 ### R005 — Preference Scope Hierarchy
@@ -56,7 +56,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S02
 - Supporting slices: none
-- Validation: unmapped
+- Validation: validated — test assertions prove scope tagging on preferences and query-time scope filtering across file, project, global scopes (S02)
 - Notes: Scope filtering at query time, not storage time
 
 ### R006 — Observer Engine with Bounded Guardrails
@@ -67,7 +67,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S02
 - Supporting slices: M001/S03
-- Validation: unmapped
+- Validation: partial — 40 test assertions prove 4 of 6 guardrails (min corrections, cooldown, auto-dismiss, no-duplicate-pending), cross-scope grouping, three-layer dedup, and suggestion lifecycle (S02). User confirmation and permission checks are S03 runtime concerns. Co-activation guardrail deferred (needs agent composition data).
 - Notes: All 6 guardrails are non-negotiable. Auto-dismiss expired suggestions after 30 days
 
 ### R007 — Live Recall Injection
@@ -224,9 +224,9 @@ This file is the explicit capability and coverage contract for the project.
 | R001 | core-capability | active | M001/S01 | none | partial (S01) |
 | R002 | core-capability | active | M001/S01 | none | validated (S01) |
 | R003 | continuity | active | M001/S01 | none | validated (S01) |
-| R004 | core-capability | active | M001/S02 | none | unmapped |
-| R005 | core-capability | active | M001/S02 | none | unmapped |
-| R006 | core-capability | active | M001/S02 | M001/S03 | unmapped |
+| R004 | core-capability | active | M001/S02 | none | validated (S02) |
+| R005 | core-capability | active | M001/S02 | none | validated (S02) |
+| R006 | core-capability | active | M001/S02 | M001/S03 | partial (S02) |
 | R007 | core-capability | active | M001/S03 | none | unmapped |
 | R008 | core-capability | active | M001/S03 | none | unmapped |
 | R009 | differentiator | active | M001/S03 | none | unmapped |
@@ -245,6 +245,6 @@ This file is the explicit capability and coverage contract for the project.
 
 - Active requirements: 15
 - Mapped to slices: 15
-- Validated: 2 (R002, R003)
-- Partially validated: 1 (R001 — contract proven, runtime pending)
+- Validated: 4 (R002, R003, R004, R005)
+- Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven, runtime concerns pending S03)
 - Unmapped active requirements: 0

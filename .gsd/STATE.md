@@ -1,28 +1,27 @@
 # GSD State
 
 **Active Milestone:** M001 — Adaptive Intelligence
-**Active Slice:** S01 — Correction Capture Foundation (complete)
-**Phase:** complete
+**Active Slice:** S02 — Preference Engine (complete, pending merge)
+**Phase:** completing
 
 ## Recent Decisions
-- D013: Correction I/O never throws — returns structured WriteResult
-- D014: Programmatic detection prefers false negatives over false positives
-- D015: Self-report via `{{corrections}}` template variable, replaced by dynamic recall in S03
-- D016: Kill switch reads preferences.md directly (cwd-relative) instead of loadEffectiveGSDPreferences() due to cached path
-- D017: Pi session entry transformation via transformSessionEntries() in auto.ts
-- D018: auto.ts correction guards use loadEffectiveGSDPreferences() (not direct file read)
+- D022: Skill existence check uses homedir() not getAgentDir() (ESM/CJS compatibility)
+- D023: Cooldown guardrail matches by target_skill or category (prevents false blocks)
+- D024: Per-correction promotion inside for-loop (independent threshold evaluation)
 
 ## Completed
 - S01: Correction Capture Foundation — 4 tasks, 133 test assertions, all verification passing
-  - correction-types.ts: 14-category taxonomy with type guards
-  - corrections.ts: JSONL I/O (write/read/rotate) with non-throwing error handling
-  - correction-detector.ts: Programmatic detection (retry, stuck, timeout, revert)
-  - auto.ts: Self-report instructions in dispatch, programmatic detection at post-completion and stuck detection
-  - preferences.ts: correction_capture kill switch
-  - gitignore.ts: .gsd/patterns/ baseline pattern
+- S02: Preference Engine — 4 tasks, 93 test assertions, all verification passing
+  - [x] T01: Create test suites and PreferenceEntry type definitions
+  - [x] T02: Build preference promotion module (pattern-preferences.ts) — 53 assertions pass
+  - [x] T03: Build observer engine (observer.ts) — 40 assertions pass
+  - [x] T04: Wire checkAndPromote and analyzePatterns into auto.ts
+
+## In Progress
+- None — S02 complete, ready for merge then S03
 
 ## Blockers
 - None
 
 ## Next Action
-S02: Preference Engine (depends on S01)
+Merge S02 branch, begin S03 (Learning Loop Closure)

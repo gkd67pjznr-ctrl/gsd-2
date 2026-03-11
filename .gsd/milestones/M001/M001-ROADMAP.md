@@ -54,7 +54,7 @@ This milestone is complete only when all are true:
 - [x] **S01: Correction Capture Foundation** `risk:high` `depends:[]`
   > After this: auto-mode runs produce structured correction entries in `.gsd/patterns/corrections.jsonl` with diagnosis categories, from both programmatic detection (retries, stuck, reverts) and self-report instructions.
 
-- [ ] **S02: Preference Engine** `risk:medium` `depends:[S01]`
+- [x] **S02: Preference Engine** `risk:medium` `depends:[S01]`
   > After this: repeated corrections auto-promote to preferences with confidence scores, the observer engine aggregates patterns with bounded guardrails, and suggestions appear for skill refinement.
 
 - [ ] **S03: Learning Loop Closure** `risk:medium` `depends:[S02]`

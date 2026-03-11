@@ -69,6 +69,8 @@ import { detectCorrections } from "./correction-detector.ts";
 import type { SessionEntry as DetectorSessionEntry } from "./correction-detector.ts";
 import { writeCorrection } from "./corrections.ts";
 import type { CorrectionEntry } from "./correction-types.ts";
+import { checkAndPromote } from "./pattern-preferences.ts";
+import { analyzePatterns } from "./observer.ts";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -881,6 +883,16 @@ async function dispatchNextUnit(
     // Programmatic correction detection — analyze the session for retries, stuck loops, etc.
     emitProgrammaticCorrections(ctx, currentUnit.type, currentUnit.id);
 
+    // Pattern analysis — aggregate corrections into suggestions for skill refinement
+    try {
+      const prefs = loadEffectiveGSDPreferences()?.preferences;
+      if (prefs?.correction_capture !== false) {
+        analyzePatterns({ cwd: basePath });
+      }
+    } catch {
+      // Non-fatal — pattern analysis must never block dispatch
+    }
+
     completedUnits.push({
       type: currentUnit.type,
       id: currentUnit.id,
@@ -1205,6 +1217,14 @@ function emitProgrammaticCorrections(
 
     for (const correction of corrections) {
       writeCorrection(correction, { cwd: basePath });
+      try {
+        checkAndPromote(
+          { category: correction.diagnosis_category, scope: correction.scope },
+          { cwd: basePath },
+        );
+      } catch {
+        // Non-fatal — preference promotion must never block dispatch
+      }
     }
   } catch {
     // Non-fatal — never block dispatch
@@ -1235,6 +1255,14 @@ function emitStuckCorrection(unitType: string, unitId: string): void {
     };
 
     writeCorrection(entry, { cwd: basePath });
+    try {
+      checkAndPromote(
+        { category: entry.diagnosis_category, scope: entry.scope },
+        { cwd: basePath },
+      );
+    } catch {
+      // Non-fatal — preference promotion must never block dispatch
+    }
   } catch {
     // Non-fatal
   }
