@@ -65,6 +65,10 @@ import {
 } from "./worktree.ts";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { makeUI, GLYPH, INDENT } from "../shared/ui.js";
+import { detectCorrections } from "./correction-detector.ts";
+import type { SessionEntry as DetectorSessionEntry } from "./correction-detector.ts";
+import { writeCorrection } from "./corrections.ts";
+import type { CorrectionEntry } from "./correction-types.ts";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -848,6 +852,9 @@ async function dispatchNextUnit(
       }
       saveActivityLog(ctx, basePath, lastUnit.type, lastUnit.id);
 
+      // Emit correction for the stuck loop
+      emitStuckCorrection(unitType, unitId);
+
       // Diagnostic: what file was expected?
       const expected = diagnoseExpectedArtifact(unitType, unitId, basePath);
       await stopAuto(ctx, pi);
@@ -870,6 +877,9 @@ async function dispatchNextUnit(
     const modelId = ctx.model?.id ?? "unknown";
     snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
     saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+
+    // Programmatic correction detection — analyze the session for retries, stuck loops, etc.
+    emitProgrammaticCorrections(ctx, currentUnit.type, currentUnit.id);
 
     completedUnits.push({
       type: currentUnit.type,
@@ -1082,6 +1092,152 @@ function buildSkillDiscoveryVars(): { skillDiscoveryMode: string; skillDiscovery
     skillDiscoveryMode: mode,
     skillDiscoveryInstructions: instructions,
   };
+}
+
+// ─── Correction Capture ───────────────────────────────────────────────────────
+
+/**
+ * Static self-report instructions for the dispatch prompt.
+ * Tells the executing agent how to log corrections when it catches its own mistakes.
+ * In S01 this is always the same block. S03 will fill it with dynamic recall data.
+ */
+const SELF_REPORT_INSTRUCTIONS = `
+10a. **Self-report corrections:** When you catch yourself making a mistake — wrong approach, bad pattern, misread requirement, stale assumption — log a correction entry so the system can learn from it. Append a single JSON line to \`.gsd/patterns/corrections.jsonl\` using \`bash\`:
+    \`\`\`
+    echo '{"correction_from":"<what you did wrong>","correction_to":"<what the fix was>","diagnosis_category":"<category>","diagnosis_text":"<1-2 sentence explanation>","scope":"<file|filetype|phase|project|global>","phase":"executing","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","session_id":"auto","source":"self_report"}' >> .gsd/patterns/corrections.jsonl
+    \`\`\`
+    Valid categories: \`code.wrong_pattern\`, \`code.missing_context\`, \`code.stale_knowledge\`, \`code.over_engineering\`, \`code.under_engineering\`, \`code.style_mismatch\`, \`code.scope_drift\`, \`process.planning_error\`, \`process.research_gap\`, \`process.implementation_bug\`, \`process.integration_miss\`, \`process.convention_violation\`, \`process.requirement_misread\`, \`process.regression\`.
+    Only log genuine corrections, not routine iterations. Keep \`diagnosis_text\` under 100 words.
+`.trim();
+
+/**
+ * Build the corrections template variable value for execute-task dispatch.
+ * Returns the self-report instruction block if correction capture is enabled,
+ * or empty string if disabled.
+ */
+function buildCorrectionsVar(): string {
+  const prefs = loadEffectiveGSDPreferences()?.preferences;
+  if (prefs?.correction_capture === false) return "";
+  return SELF_REPORT_INSTRUCTIONS;
+}
+
+/**
+ * Transform Pi session entries (from ctx.sessionManager.getEntries()) into
+ * the detector's SessionEntry format. The Pi format uses nested message
+ * wrappers; the detector expects flat {type, tool, input, result} objects.
+ */
+function transformSessionEntries(piEntries: unknown[]): DetectorSessionEntry[] {
+  const results: DetectorSessionEntry[] = [];
+
+  // Track pending tool calls by ID for matching with results
+  const pendingTools = new Map<string, { name: string; input: Record<string, unknown> }>();
+
+  for (const raw of piEntries) {
+    const entry = raw as Record<string, unknown>;
+    if (entry.type !== "message" || !entry.message) continue;
+    const msg = entry.message as Record<string, unknown>;
+
+    if (msg.role === "assistant" && Array.isArray(msg.content)) {
+      for (const part of msg.content as Record<string, unknown>[]) {
+        if (part.type === "toolCall") {
+          const name = String(part.name || "unknown");
+          const input = (part.arguments || part.input || {}) as Record<string, unknown>;
+          const id = String(part.id || "");
+          if (id) pendingTools.set(id, { name, input });
+        }
+      }
+    }
+
+    if (msg.role === "toolResult") {
+      const id = String(msg.toolCallId || "");
+      const pending = pendingTools.get(id);
+      if (pending) {
+        const content = msg.content;
+        let resultText = "";
+        if (typeof content === "string") {
+          resultText = content;
+        } else if (Array.isArray(content)) {
+          resultText = (content as Record<string, unknown>[])
+            .filter(c => c.type === "text")
+            .map(c => String(c.text || ""))
+            .join("\n");
+        }
+        results.push({
+          type: "tool_call",
+          tool: pending.name,
+          input: pending.input,
+          result: resultText.slice(0, 1000),
+        });
+        pendingTools.delete(id);
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Run programmatic correction detection on the current session entries and
+ * write any detected corrections. Non-fatal — never blocks dispatch.
+ */
+function emitProgrammaticCorrections(
+  ctx: ExtensionContext,
+  unitType: string,
+  unitId: string,
+): void {
+  try {
+    const prefs = loadEffectiveGSDPreferences()?.preferences;
+    if (prefs?.correction_capture === false) return;
+
+    const piEntries = ctx.sessionManager.getEntries();
+    if (!piEntries || piEntries.length === 0) return;
+
+    const detectorEntries = transformSessionEntries(piEntries);
+    if (detectorEntries.length === 0) return;
+
+    const corrections = detectCorrections({
+      session_id: `auto-${unitType}-${unitId}`,
+      phase: unitType,
+      entries: detectorEntries,
+      unit_type: unitType,
+      unit_id: unitId,
+    });
+
+    for (const correction of corrections) {
+      writeCorrection(correction, { cwd: basePath });
+    }
+  } catch {
+    // Non-fatal — never block dispatch
+  }
+}
+
+/**
+ * Emit a single correction entry for a stuck detection.
+ * Called when retryCount > MAX_RETRIES for the same unit.
+ */
+function emitStuckCorrection(unitType: string, unitId: string): void {
+  try {
+    const prefs = loadEffectiveGSDPreferences()?.preferences;
+    if (prefs?.correction_capture === false) return;
+
+    const entry: CorrectionEntry = {
+      correction_from: `Unit ${unitType} ${unitId} dispatched ${retryCount + 1} times without producing expected artifact`,
+      correction_to: "Auto-mode stopped due to stuck loop",
+      diagnosis_category: "process.implementation_bug",
+      diagnosis_text: `Stuck loop detected: ${unitType} ${unitId} was dispatched ${retryCount + 1} times. The expected durable artifact was not produced, indicating the agent could not complete this unit.`,
+      scope: "project",
+      phase: unitType,
+      timestamp: new Date().toISOString(),
+      session_id: `auto-${unitType}-${unitId}`,
+      source: "programmatic",
+      unit_type: unitType,
+      unit_id: unitId,
+    };
+
+    writeCorrection(entry, { cwd: basePath });
+  } catch {
+    // Non-fatal
+  }
 }
 
 // ─── Inline Helpers ───────────────────────────────────────────────────────────
@@ -1356,6 +1512,7 @@ async function buildExecuteTaskPrompt(
     resumeSection,
     priorTaskLines: priorLines,
     taskSummaryAbsPath,
+    corrections: buildCorrectionsVar(),
   });
 }
 

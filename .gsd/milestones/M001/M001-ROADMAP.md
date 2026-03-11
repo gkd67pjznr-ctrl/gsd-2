@@ -51,7 +51,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Correction Capture Foundation** `risk:high` `depends:[]`
+- [x] **S01: Correction Capture Foundation** `risk:high` `depends:[]`
   > After this: auto-mode runs produce structured correction entries in `.gsd/patterns/corrections.jsonl` with diagnosis categories, from both programmatic detection (retries, stuck, reverts) and self-report instructions.
 
 - [ ] **S02: Preference Engine** `risk:medium` `depends:[S01]`

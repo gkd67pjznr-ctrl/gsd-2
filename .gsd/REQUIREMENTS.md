@@ -12,8 +12,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: none
-- Validation: unmapped
-- Notes: In gsdup this uses PostToolUse hooks (CJS). In gsd2, the auto mode can detect corrections programmatically at the TypeScript level (diff analysis after unit completion, retry detection, stuck detection)
+- Validation: partial — contract proven (types, I/O, detection from fixtures); runtime proof pending real auto-mode runs in S02/S03
+- Notes: Implemented via dual approach: programmatic detection (detectCorrections with 4 signals: retry, stuck, timeout, revert) + self-report instructions in dispatch prompts. Wired into auto.ts at post-completion and stuck detection points. Kill switch via correction_capture preference.
 
 ### R002 — Diagnosis Taxonomy
 - Class: core-capability
@@ -23,8 +23,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: none
-- Validation: unmapped
-- Notes: 14 categories across code tier and process tier, proven in gsdup v6.0
+- Validation: validated — 82 test assertions prove all 14 categories valid, validators reject invalid categories, type guards enforce membership (S01)
+- Notes: 14 categories across code tier and process tier, proven in gsdup v6.0. Implemented as VALID_CATEGORIES Set with isValidCategory() and isValidEntry() guards.
 
 ### R003 — Correction Storage and Rotation
 - Class: continuity
@@ -34,8 +34,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Storage location is `.gsd/patterns/corrections.jsonl`
+- Validation: validated — 26 test assertions prove write/read/rotate lifecycle, validation rejection, field truncation, rotation at threshold, archive collision handling, retention cleanup (S01)
+- Notes: Storage location is `.gsd/patterns/corrections.jsonl`. Archive naming: `corrections-YYYY-MM-DD.jsonl` with `-N` suffix for same-day collisions.
 
 ### R004 — Preference Promotion
 - Class: core-capability
@@ -221,9 +221,9 @@ This file is the explicit capability and coverage contract for the project.
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
 |---|---|---|---|---|---|
-| R001 | core-capability | active | M001/S01 | none | unmapped |
-| R002 | core-capability | active | M001/S01 | none | unmapped |
-| R003 | continuity | active | M001/S01 | none | unmapped |
+| R001 | core-capability | active | M001/S01 | none | partial (S01) |
+| R002 | core-capability | active | M001/S01 | none | validated (S01) |
+| R003 | continuity | active | M001/S01 | none | validated (S01) |
 | R004 | core-capability | active | M001/S02 | none | unmapped |
 | R005 | core-capability | active | M001/S02 | none | unmapped |
 | R006 | core-capability | active | M001/S02 | M001/S03 | unmapped |
@@ -245,5 +245,6 @@ This file is the explicit capability and coverage contract for the project.
 
 - Active requirements: 15
 - Mapped to slices: 15
-- Validated: 0
+- Validated: 2 (R002, R003)
+- Partially validated: 1 (R001 — contract proven, runtime pending)
 - Unmapped active requirements: 0

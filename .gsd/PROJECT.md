@@ -23,6 +23,7 @@ The auto-mode state machine that drives fresh-context-per-task execution through
 - Preferences system (models, skills, custom instructions)
 - Migration tool for v1 `.planning/` directories
 - 20+ LLM provider support via Pi SDK
+- **Correction capture foundation** (M001/S01): 14-category diagnosis taxonomy, JSONL persistence with rotation, programmatic detection from session traces, self-report instructions in dispatch prompts, kill switch via preferences
 
 ## Architecture / Key Patterns
 

@@ -43,6 +43,7 @@ export interface GSDPreferences {
   auto_supervisor?: AutoSupervisorConfig;
   uat_dispatch?: boolean;
   budget_ceiling?: number;
+  correction_capture?: boolean;
 }
 
 export interface LoadedGSDPreferences {
@@ -495,6 +496,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     auto_supervisor: { ...(base.auto_supervisor ?? {}), ...(override.auto_supervisor ?? {}) },
     uat_dispatch: override.uat_dispatch ?? base.uat_dispatch,
     budget_ceiling: override.budget_ceiling ?? base.budget_ceiling,
+    correction_capture: override.correction_capture ?? base.correction_capture,
   };
 }
 

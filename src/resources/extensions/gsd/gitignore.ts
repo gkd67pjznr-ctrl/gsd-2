@@ -16,6 +16,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 const BASELINE_PATTERNS = [
   // ── GSD runtime (not source artifacts) ──
   ".gsd/activity/",
+  ".gsd/patterns/",
   ".gsd/runtime/",
   ".gsd/worktrees/",
   ".gsd/auto.lock",
