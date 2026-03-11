@@ -78,8 +78,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S03
 - Supporting slices: none
-- Validation: unmapped
-- Notes: GSD2's prompt-loader architecture makes this natural — add a {{corrections}} variable to dispatch prompts
+- Validation: validated — 22 test assertions prove recall assembly with token budget (3K cap), 10-slot allocation (preferences first), deduplication (promoted corrections excluded), kill switch, and self-report preservation. buildCorrectionsVar() in auto.ts calls buildRecallBlock() (S03)
+- Notes: Implemented via buildRecallBlock() in recall.ts, wired into auto.ts buildCorrectionsVar(). Token estimation uses words/0.75. Self-report instructions appended after dynamic recall block.
 
 ### R008 — Skill Refinement Workflow
 - Class: core-capability
@@ -89,8 +89,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S03
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Retirement marks corrections with retired_at and retired_by fields, non-destructive
+- Validation: validated — 21 test assertions prove retirement of corrections (active + archive), preferences, suggestion status updates to 'refined', idempotency, malformed line preservation, missing file handling. Observer suggestions from S02 provide the proposal side (S03)
+- Notes: Implemented via retireByCategory() in retire.ts. Processes corrections.jsonl, preferences.jsonl, and suggestions.json. Non-destructive: sets retired_at/retired_by fields. No CLI surface yet — retirement must be triggered programmatically.
 
 ### R009 — Cross-Project Preference Promotion
 - Class: differentiator
@@ -100,8 +100,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S03
 - Supporting slices: none
-- Validation: unmapped
-- Notes: User-level store uses JSON (read-heavy), project-level uses JSONL (append-heavy)
+- Validation: validated — 29 test assertions prove cross-project tracking via source_projects, promotion at 3+ projects, upsert semantics, confidence merging (max), GSD_HOME redirect for testability, and input validation with structured error codes (S03)
+- Notes: Implemented via promoteToUserLevel() in promote-preference.ts. Called from checkAndPromote() in pattern-preferences.ts after successful preference write. User-level store uses JSON at ~/.gsd/preferences.json (read-heavy), project-level uses JSONL (append-heavy).
 
 ### R010 — Quality Level Configuration
 - Class: core-capability
@@ -227,9 +227,9 @@ This file is the explicit capability and coverage contract for the project.
 | R004 | core-capability | active | M001/S02 | none | validated (S02) |
 | R005 | core-capability | active | M001/S02 | none | validated (S02) |
 | R006 | core-capability | active | M001/S02 | M001/S03 | partial (S02) |
-| R007 | core-capability | active | M001/S03 | none | unmapped |
-| R008 | core-capability | active | M001/S03 | none | unmapped |
-| R009 | differentiator | active | M001/S03 | none | unmapped |
+| R007 | core-capability | active | M001/S03 | none | validated (S03) |
+| R008 | core-capability | active | M001/S03 | none | validated (S03) |
+| R009 | differentiator | active | M001/S03 | none | validated (S03) |
 | R010 | core-capability | active | M001/S04 | none | unmapped |
 | R011 | core-capability | active | M001/S04 | none | unmapped |
 | R012 | quality-attribute | active | M001/S04 | none | unmapped |
@@ -245,6 +245,6 @@ This file is the explicit capability and coverage contract for the project.
 
 - Active requirements: 15
 - Mapped to slices: 15
-- Validated: 4 (R002, R003, R004, R005)
-- Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven, runtime concerns pending S03)
+- Validated: 7 (R002, R003, R004, R005, R007, R008, R009)
+- Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven, user confirmation and permission checks pending)
 - Unmapped active requirements: 0

@@ -57,7 +57,7 @@ This milestone is complete only when all are true:
 - [x] **S02: Preference Engine** `risk:medium` `depends:[S01]`
   > After this: repeated corrections auto-promote to preferences with confidence scores, the observer engine aggregates patterns with bounded guardrails, and suggestions appear for skill refinement.
 
-- [ ] **S03: Learning Loop Closure** `risk:medium` `depends:[S02]`
+- [x] **S03: Learning Loop Closure** `risk:medium` `depends:[S02]`
   > After this: dispatch prompts include relevant past corrections filtered by context, skill refinement retires source corrections, and preferences appearing in 3+ projects promote to user-level.
 
 - [ ] **S04: Quality Gating** `risk:low` `depends:[]`

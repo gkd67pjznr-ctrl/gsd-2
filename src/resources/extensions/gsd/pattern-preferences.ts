@@ -22,11 +22,12 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { homedir } from "node:os";
 import type { DiagnosisCategory, CorrectionScope, CorrectionEntry } from "./correction-types.ts";
 import { VALID_CATEGORIES } from "./correction-types.ts";
 import { readCorrections } from "./corrections.ts";
+import { promoteToUserLevel } from "./promote-preference.js";
 import type {
   PreferenceEntry,
   PromoteResult,
@@ -328,6 +329,21 @@ export function checkAndPromote(
     const writeResult = writePreference(preference, { cwd });
     if (!writeResult.written) {
       return { promoted: false, reason: "error" };
+    }
+
+    // Cross-project promotion — non-fatal
+    try {
+      promoteToUserLevel(
+        {
+          category: preference.category,
+          scope: preference.scope,
+          preference_text: preference.preference_text,
+          confidence: preference.confidence,
+        },
+        { projectId: basename(cwd) },
+      );
+    } catch (_) {
+      /* promotion failure must never block preference write success */
     }
 
     return { promoted: true, count, confidence };

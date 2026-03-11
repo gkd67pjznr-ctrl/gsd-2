@@ -66,6 +66,7 @@ import {
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { makeUI, GLYPH, INDENT } from "../shared/ui.js";
 import { detectCorrections } from "./correction-detector.ts";
+import { buildRecallBlock } from "./recall.js";
 import type { SessionEntry as DetectorSessionEntry } from "./correction-detector.ts";
 import { writeCorrection } from "./corrections.ts";
 import type { CorrectionEntry } from "./correction-types.ts";
@@ -1128,9 +1129,7 @@ const SELF_REPORT_INSTRUCTIONS = `
  * or empty string if disabled.
  */
 function buildCorrectionsVar(): string {
-  const prefs = loadEffectiveGSDPreferences()?.preferences;
-  if (prefs?.correction_capture === false) return "";
-  return SELF_REPORT_INSTRUCTIONS;
+  return buildRecallBlock();
 }
 
 /**
