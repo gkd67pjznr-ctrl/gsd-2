@@ -123,7 +123,8 @@ Before implementing, perform these checks:
 ## Post-Task Quality Gates
 After implementation, before writing the task summary:
 - **Diff review:** Run \`git diff --stat\` and scan the diff for naming conflicts, leftover TODOs, debug logging, unhandled error paths, and accidental file changes.
-- **Test check:** If you created new exported functions or classes, verify that tests cover them. Add tests for untested exports.`;
+- **Test check:** If you created new exported functions or classes, verify that tests cover them. Add tests for untested exports.
+- **Tech debt logging:** Log any critical or high severity code issues you noticed (bugs, design problems, test gaps, doc gaps) to \`.gsd/TECH-DEBT.md\` using the structured format.`;
 
 const STRICT_INSTRUCTIONS = `## Pre-Task Quality Gates (Strict)
 Before implementing, perform ALL of these checks:
@@ -135,7 +136,8 @@ Before implementing, perform ALL of these checks:
 After implementation, before writing the task summary:
 - **Full test suite:** Run ALL tests — both new tests and the full existing test suite. Every test must pass. If any test fails, fix it before proceeding.
 - **Diff review (line-by-line):** Run \`git diff\` and review every changed line for logic correctness, not just naming and style. Check for edge cases, off-by-one errors, missing null checks, and incorrect assumptions.
-- **Test check:** If you created new exported functions or classes, verify that tests cover them. Add tests for untested exports.`;
+- **Test check:** If you created new exported functions or classes, verify that tests cover them. Add tests for untested exports.
+- **Tech debt logging (all severities):** Log ALL code issues discovered during this task (critical, high, medium, low) to \`.gsd/TECH-DEBT.md\` using the structured format.`;
 
 // ─── Gate Event Management ─────────────────────────────────────────────────
 

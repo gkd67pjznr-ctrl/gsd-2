@@ -72,6 +72,7 @@ import { writeCorrection } from "./corrections.ts";
 import type { CorrectionEntry } from "./correction-types.ts";
 import { checkAndPromote } from "./pattern-preferences.ts";
 import { analyzePatterns } from "./observer.ts";
+import { diffPlanVsSummary } from "./passive-monitor.ts";
 import {
   resolveQualityLevel,
   buildQualityInstructions,
@@ -905,6 +906,43 @@ async function dispatchNextUnit(
       }
     } catch {
       // Non-fatal — pattern analysis must never block dispatch
+    }
+
+    // Passive monitoring — detect plan-vs-summary drift after slice completions
+    try {
+      const pmPrefs = loadEffectiveGSDPreferences()?.preferences;
+      if (pmPrefs?.correction_capture !== false && currentUnit.type === "complete-slice") {
+        const [pmMid, pmSid] = currentUnit.id.split("/");
+        if (pmMid && pmSid) {
+          const planFile = resolveSliceFile(basePath, pmMid, pmSid, "PLAN");
+          const summaryFile = resolveSliceFile(basePath, pmMid, pmSid, "SUMMARY");
+          const planContent = planFile ? await loadFile(planFile) : null;
+          const summaryContent = summaryFile ? await loadFile(summaryFile) : null;
+          if (planContent && summaryContent) {
+            const drift = diffPlanVsSummary(planContent, summaryContent);
+            for (const obs of drift.observations) {
+              const diagCategory = obs.kind === "shift"
+                ? "process.planning_error" as const
+                : "code.scope_drift" as const;
+              writeCorrection({
+                correction_from: `Slice ${pmMid}/${pmSid} plan`,
+                correction_to: `Slice ${pmMid}/${pmSid} summary — ${obs.kind}: ${obs.details}`,
+                diagnosis_category: diagCategory,
+                diagnosis_text: obs.details,
+                scope: "project",
+                phase: "completing",
+                timestamp: new Date().toISOString(),
+                session_id: `auto-complete-slice-${pmMid}/${pmSid}`,
+                source: "programmatic",
+                unit_type: "complete-slice",
+                unit_id: currentUnit.id,
+              } satisfies CorrectionEntry, { cwd: basePath });
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — passive monitoring must never block dispatch
     }
 
     completedUnits.push({

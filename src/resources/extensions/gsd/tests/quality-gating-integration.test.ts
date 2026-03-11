@@ -373,6 +373,72 @@ console.log("--- Metrics: gateEvents round-trip ---");
   rmSync(tmpDir, { recursive: true, force: true });
 }
 
+// ─── Tech Debt Auto-Logging Instructions ──────────────────────────────────────
+
+console.log("--- Tech Debt: auto-logging instructions in quality levels ---");
+
+// Test: Standard instructions include tech debt auto-logging for critical/high
+{
+  const standard = buildQualityInstructions("standard");
+  assert(
+    standard.includes("Tech debt logging"),
+    "standard instructions include 'Tech debt logging' heading",
+  );
+  assert(
+    standard.includes("TECH-DEBT.md"),
+    "standard instructions reference TECH-DEBT.md",
+  );
+  assert(
+    standard.includes("critical or high severity"),
+    "standard instructions mention critical or high severity",
+  );
+}
+
+// Test: Strict instructions include tech debt auto-logging for all severities
+{
+  const strict = buildQualityInstructions("strict");
+  assert(
+    strict.includes("Tech debt logging"),
+    "strict instructions include 'Tech debt logging' heading",
+  );
+  assert(
+    strict.includes("TECH-DEBT.md"),
+    "strict instructions reference TECH-DEBT.md",
+  );
+  assert(
+    strict.includes("all severities") || strict.includes("ALL code issues"),
+    "strict instructions mention all severities",
+  );
+}
+
+// Test: Fast level does NOT include tech debt auto-logging
+{
+  const fast = buildQualityInstructions("fast");
+  assertEq(fast, "", "fast instructions remain empty string");
+  assert(
+    !fast.includes("Tech debt"),
+    "fast instructions do not include tech debt text",
+  );
+  assert(
+    !fast.includes("TECH-DEBT.md"),
+    "fast instructions do not reference TECH-DEBT.md",
+  );
+}
+
+// Test: Standard and strict have different tech debt severity scopes
+{
+  const standard = buildQualityInstructions("standard");
+  const strict = buildQualityInstructions("strict");
+  assert(
+    standard.includes("critical or high"),
+    "standard scopes to critical/high only",
+  );
+  assert(
+    strict.includes("ALL code issues"),
+    "strict scopes to all code issues",
+  );
+}
+
 // ─── Dashboard: Quality Gates Section ─────────────────────────────────────────
 
 console.log("--- Dashboard: quality gate aggregation and rendering ---");

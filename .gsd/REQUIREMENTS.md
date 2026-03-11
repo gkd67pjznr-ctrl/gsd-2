@@ -144,8 +144,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S05
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Auto-logging at standard/strict quality levels. Project-level, not milestone-scoped
+- Validation: validated — 94 test assertions prove write/read/resolve lifecycle, sequential TD-NNN ID assignment with gap handling, all 4 types and 4 severities, resolve updates status, lenient parsing handles missing fields with safe defaults, non-throwing on I/O errors, empty file handling (S05)
+- Notes: Auto-logging at standard/strict quality levels. Project-level, not milestone-scoped. Implemented as structured markdown with `## TD-NNN:` sections, parsed leniently by listDebt().
 
 ### R014 — Tech Debt Auto-Logging
 - Class: quality-attribute
@@ -155,8 +155,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M001/S05
 - Supporting slices: M001/S04
-- Validation: unmapped
-- Notes: Auto-logging instructions injected into dispatch prompts at standard/strict levels
+- Validation: validated — integration tests prove tech debt auto-logging instructions present in buildQualityInstructions() output at standard (critical/high) and strict (all severities), absent at fast; instructions reference .gsd/TECH-DEBT.md and structured format (S05)
+- Notes: Auto-logging instructions injected into dispatch prompts at standard/strict levels. Instruction-based — agent compliance not programmatically enforced.
 
 ### R015 — Passive Monitoring
 - Class: quality-attribute
@@ -166,8 +166,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: inferred
 - Primary owning slice: M001/S05
 - Supporting slices: M001/S01
-- Validation: unmapped
-- Notes: Runs as a post-completion step in auto mode, not a background process
+- Validation: validated — 34 test assertions prove drift detection for expansion/contraction/shift, documented deviation exclusion, empty/malformed input handling, non-throwing guarantee; grep confirms diffPlanVsSummary wired into auto.ts post-completion block gated by correction_capture kill switch and complete-slice unit type (S05)
+- Notes: Runs as a post-completion step in auto mode, not a background process. State transition detection deferred — plan-vs-summary drift is the implemented scope.
 
 ## Deferred
 
@@ -233,9 +233,9 @@ This file is the explicit capability and coverage contract for the project.
 | R010 | core-capability | active | M001/S04 | none | validated (S04) |
 | R011 | core-capability | active | M001/S04 | none | validated (S04) |
 | R012 | quality-attribute | active | M001/S04 | none | validated (S04) |
-| R013 | core-capability | active | M001/S05 | none | unmapped |
-| R014 | quality-attribute | active | M001/S05 | M001/S04 | unmapped |
-| R015 | quality-attribute | active | M001/S05 | M001/S01 | unmapped |
+| R013 | core-capability | active | M001/S05 | none | validated (S05) |
+| R014 | quality-attribute | active | M001/S05 | M001/S04 | validated (S05) |
+| R015 | quality-attribute | active | M001/S05 | M001/S01 | validated (S05) |
 | R016 | quality-attribute | deferred | none | none | unmapped |
 | R017 | differentiator | deferred | none | none | unmapped |
 | R018 | constraint | out-of-scope | none | none | n/a |
@@ -245,6 +245,6 @@ This file is the explicit capability and coverage contract for the project.
 
 - Active requirements: 15
 - Mapped to slices: 15
-- Validated: 10 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012)
+- Validated: 13 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015)
 - Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven, user confirmation and permission checks pending)
 - Unmapped active requirements: 0
