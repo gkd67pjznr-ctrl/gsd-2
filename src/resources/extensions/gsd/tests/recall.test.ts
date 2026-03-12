@@ -73,14 +73,24 @@ function estimateTokens(text: string): number {
 }
 
 let tmpDir: string;
+let savedGsdHome: string | undefined;
 
 function setup(): void {
   tmpDir = mkdtempSync(join(tmpdir(), "gsd-recall-test-"));
   mkdirSync(join(tmpDir, ".gsd", "patterns"), { recursive: true });
+  // Redirect user-level preferences to temp dir so tests don't read real ~/.gsd/
+  savedGsdHome = process.env.GSD_HOME;
+  process.env.GSD_HOME = join(tmpDir, ".gsd");
 }
 
 function cleanup(): void {
   try {
+    // Restore GSD_HOME
+    if (savedGsdHome === undefined) {
+      delete process.env.GSD_HOME;
+    } else {
+      process.env.GSD_HOME = savedGsdHome;
+    }
     rmSync(tmpDir, { recursive: true, force: true });
   } catch {
     // Ignore cleanup errors
@@ -332,6 +342,93 @@ console.log("\n=== buildRecallBlock — self-report instructions preserved ===")
 
   assert(selfReportIdx !== -1, "self-report instructions present in output");
   assert(selfReportIdx > reminderEnd || reminderEnd === -1, "self-report instructions appear after system-reminder block");
+
+  cleanup();
+}
+
+// ─── Test: user-level preferences included in recall ──────────────────────
+
+console.log("\n=== buildRecallBlock — user-level preferences ===");
+
+{
+  setup();
+
+  // Write a promoted user-level preference to GSD_HOME/preferences.json
+  const userPrefsPath = join(tmpDir, ".gsd", "preferences.json");
+  const userDoc = {
+    version: "1.0",
+    preferences: [
+      {
+        category: "code.stale_knowledge",
+        scope: "global",
+        preference_text: "Always check docs before assuming API shape",
+        confidence: 0.8,
+        source_projects: ["proj-a", "proj-b", "proj-c"],
+        promoted_at: "2026-01-15T00:00:00Z",
+        updated_at: "2026-01-15T00:00:00Z",
+      },
+      {
+        // Not promoted yet — should be excluded
+        category: "code.wrong_pattern",
+        scope: "file",
+        preference_text: "This should NOT appear — not promoted",
+        confidence: 0.5,
+        source_projects: ["proj-a"],
+        promoted_at: null,
+        updated_at: "2026-01-15T00:00:00Z",
+      },
+    ],
+  };
+  writeFileSync(userPrefsPath, JSON.stringify(userDoc, null, 2));
+
+  // No project-level preferences — only user-level
+  const result = buildRecallBlock({ cwd: tmpDir });
+
+  assert(result.includes("Always check docs before assuming API shape"), "promoted user-level preference included in recall");
+  assert(!result.includes("This should NOT appear"), "non-promoted user-level preference excluded");
+  assert(result.includes("system-reminder"), "recall block has system-reminder wrapper");
+
+  cleanup();
+}
+
+// ─── Test: project-level preference wins over duplicate user-level ─────────
+
+console.log("\n=== buildRecallBlock — project-level dedup over user-level ===");
+
+{
+  setup();
+
+  // Project-level preference for code.wrong_pattern:file
+  writePreferences([
+    makePreference({
+      category: "code.wrong_pattern",
+      scope: "file",
+      preference_text: "Project-level: use helper function",
+    }),
+  ]);
+
+  // User-level preference for same category:scope
+  const userPrefsPath = join(tmpDir, ".gsd", "preferences.json");
+  const userDoc = {
+    version: "1.0",
+    preferences: [
+      {
+        category: "code.wrong_pattern",
+        scope: "file",
+        preference_text: "User-level: this should be deduped out",
+        confidence: 0.8,
+        source_projects: ["proj-a", "proj-b", "proj-c"],
+        promoted_at: "2026-01-15T00:00:00Z",
+        updated_at: "2026-01-15T00:00:00Z",
+      },
+    ],
+  };
+  writeFileSync(userPrefsPath, JSON.stringify(userDoc, null, 2));
+
+  const result = buildRecallBlock({ cwd: tmpDir });
+
+  assert(result.includes("Project-level: use helper function"), "project-level preference present");
+  assert(!result.includes("User-level: this should be deduped out"), "user-level duplicate excluded — project wins");
 
   cleanup();
 }

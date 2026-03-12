@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { readCorrections } from "./corrections.ts";
 import { readPreferences } from "./pattern-preferences.ts";
+import { readUserPreferences } from "./promote-preference.js";
 import type { CorrectionEntry } from "./correction-types.ts";
 import type { PreferenceEntry } from "./preference-types.ts";
 
@@ -125,8 +126,40 @@ export function buildRecallBlock(options?: { cwd?: string }): string {
       return "";
     }
 
-    // Read active data
-    const preferences = readPreferences({ status: "active" }, { cwd });
+    // Read active data — project-level preferences + user-level promoted preferences
+    const projectPrefs = readPreferences({ status: "active" }, { cwd });
+    const userDoc = readUserPreferences();
+    const userPrefs: PreferenceEntry[] = userDoc.preferences
+      .filter(u => u.promoted_at) // only actually promoted entries
+      .map(u => ({
+        category: u.category,
+        scope: u.scope,
+        preference_text: u.preference_text,
+        confidence: u.confidence,
+        source: "user_level" as const,
+        created_at: u.promoted_at!,
+        updated_at: u.updated_at,
+      }));
+
+    // Merge: project-level first (more specific), then user-level (broader).
+    // Dedup by category:scope — project-level wins if both exist.
+    const seenPrefKeys = new Set<string>();
+    const preferences: PreferenceEntry[] = [];
+    for (const p of projectPrefs) {
+      const key = `${p.category}:${p.scope}`;
+      if (!seenPrefKeys.has(key)) {
+        seenPrefKeys.add(key);
+        preferences.push(p);
+      }
+    }
+    for (const p of userPrefs) {
+      const key = `${p.category}:${p.scope}`;
+      if (!seenPrefKeys.has(key)) {
+        seenPrefKeys.add(key);
+        preferences.push(p);
+      }
+    }
+
     const corrections = readCorrections({ status: "active" }, { cwd });
 
     // Dedup: build Set of category:scope from preferences
