@@ -1,6 +1,6 @@
 # GSD State
 
-**Active Milestone:** None
+**Active Milestone:** none
 **Phase:** idle
 
 ## Completed Milestones
@@ -12,18 +12,5 @@
 - D035: Passive monitoring runs only after complete-slice, not after every task
 - D036: Drift observations use existing correction categories
 
-## Completed
-- M001/S01: Correction Capture Foundation — 4 tasks, 133 test assertions
-- M001/S02: Preference Engine — 4 tasks, 93 test assertions
-- M001/S03: Learning Loop Closure — 4 tasks, 72 test assertions
-- M001/S04: Quality Gating — 3 tasks, 124 test assertions
-- M001/S05: Tech Debt & Passive Monitoring — 3 tasks, 128 test assertions
-
-## In Progress
-- None
-
-## Blockers
-- None
-
 ## Next Action
-Queue next milestone or start new work
+No active milestone. Run `/gsd` to start next milestone or `/gsd queue` to check queued work.
