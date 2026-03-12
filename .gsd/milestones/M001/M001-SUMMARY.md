@@ -152,8 +152,21 @@ The entire pipeline — capture → promote → recall → gate → monitor — 
 ### Partially Met / Known Gaps
 - **R001 runtime proof**: Corrections are captured in test fixtures; real auto-mode runs producing actual corrections haven't happened yet. This will be proven organically when M002 runs.
 - **R006 co-activation guardrail**: Requires agent composition data that doesn't exist yet. 4 of 6 guardrails are contract-proven.
-- **User-level preference read path**: `promoteToUserLevel()` writes to `~/.gsd/preferences.json` but nothing reads it back into `buildRecallBlock()` yet. The write side works; the read side is a future integration.
-- **Retirement CLI**: `retireByCategory()` exists but has no user-facing command to trigger it.
+
+## Follow-up Resolution
+
+| Source | Follow-up | Disposition |
+|--------|-----------|-------------|
+| S01 | S02 will consume readCorrections() and CorrectionEntry for preference promotion | Addressed — S02 imports and uses both |
+| S01 | S03 will replace static self-report instructions with dynamic recall injection | Addressed — S03 buildRecallBlock() replaced static block |
+| S01 | S05 will reuse writeCorrection() for passive monitoring observations | Addressed — S05 passive-monitor feeds drift into correction system |
+| S01 | Real runtime verification of correction capture should happen during S02/S03 integration testing | Deferred — requires real auto-mode run producing actual corrections; will prove organically in M002+ |
+| S02 | S03 will consume readPreferences() and analyzePatterns() | Addressed — S03 recall.ts imports readPreferences() |
+| S03 | User-level preference recall: read ~/.gsd/preferences.json back into buildRecallBlock() | **Resolved** — fixed during milestone completion (recall.ts now imports readUserPreferences and merges promoted user-level prefs, 5 new test assertions) |
+| S03 | Retirement command: expose retireByCategory() via /gsd subcommand | Deferred — no user-facing command infrastructure exists yet; retirement works programmatically; CLI surface is a future feature |
+| S04 | S05 consumes resolveQualityLevel() to gate tech debt auto-logging severity | Addressed — S05 quality-gating.ts extended with tech debt instructions |
+| S04 | Actual gate recording at execution points (codebase scan, Context7 lookup, test runs) | Deferred — infrastructure exists (recordGateEvent, GateEvent type, metrics persistence) but callers don't record yet; requires real execution integration |
+| S05 | None — final slice, no follow-ups | N/A |
 
 ## Requirement Changes
 
