@@ -42,6 +42,21 @@ completed_at: {{date}}
 
 {{howSuccessCriteriaWereVerified}}
 
+## Follow-up Resolution
+
+<!-- Every follow-up and known limitation from slice summaries must appear here
+     with an explicit disposition. The milestone completion step is the last chance
+     to close small gaps before the work is marked done.
+
+     Dispositions:
+     - **Resolved:** Fixed during milestone completion (reference the fix)
+     - **Addressed:** Handled by a later slice within this milestone (reference which)
+     - **Deferred:** Genuinely belongs to a future milestone (one-line reason) -->
+
+| Source | Follow-up | Disposition |
+|--------|-----------|-------------|
+| {{sliceId}} | {{followUpDescription}} | {{resolved/addressed/deferred — detail}} |
+
 ## Requirement Changes
 
 <!-- Transitions with evidence. Each requirement that changed status during this milestone
