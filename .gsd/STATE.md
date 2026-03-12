@@ -1,8 +1,10 @@
 # GSD State
 
-**Active Milestone:** M001 — Adaptive Intelligence
-**Active Slice:** S05 — Tech Debt & Passive Monitoring (complete)
-**Phase:** completing
+**Active Milestone:** None
+**Phase:** idle
+
+## Completed Milestones
+- M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
 
 ## Recent Decisions
 - D033: TECH-DEBT.md uses structured markdown, not JSONL
@@ -11,17 +13,17 @@
 - D036: Drift observations use existing correction categories
 
 ## Completed
-- S01: Correction Capture Foundation — 4 tasks, 133 test assertions
-- S02: Preference Engine — 4 tasks, 93 test assertions
-- S03: Learning Loop Closure — 4 tasks, 165 test assertions
-- S04: Quality Gating — 3 tasks, 161 test assertions
-- S05: Tech Debt & Passive Monitoring — 3 tasks, 300 test assertions across all suites
+- M001/S01: Correction Capture Foundation — 4 tasks, 133 test assertions
+- M001/S02: Preference Engine — 4 tasks, 93 test assertions
+- M001/S03: Learning Loop Closure — 4 tasks, 72 test assertions
+- M001/S04: Quality Gating — 3 tasks, 124 test assertions
+- M001/S05: Tech Debt & Passive Monitoring — 3 tasks, 128 test assertions
 
 ## In Progress
-- None — all 5 slices complete, ready for milestone completion
+- None
 
 ## Blockers
 - None
 
 ## Next Action
-Complete milestone M001 — all 5 slices done, all verification passing
+Queue next milestone or start new work
