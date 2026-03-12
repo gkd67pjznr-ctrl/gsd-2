@@ -4,7 +4,7 @@
 
 GSD 2 (Get Shit Done) is a standalone TypeScript CLI built on the Pi SDK that structures AI-assisted coding into milestones → slices → tasks, with programmatic session management, auto mode, crash recovery, cost tracking, and clean git strategy. It's a complete rewrite of the original GSD prompt framework.
 
-All five adaptive intelligence capabilities from the gsdup fork have been implemented: correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring.
+All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified: correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring.
 
 ## Core Value
 
@@ -23,11 +23,13 @@ The auto-mode state machine that drives fresh-context-per-task execution through
 - Preferences system (models, skills, custom instructions)
 - Migration tool for v1 `.planning/` directories
 - 20+ LLM provider support via Pi SDK
-- **Correction capture foundation** (M001/S01): 14-category diagnosis taxonomy, JSONL persistence with rotation, programmatic detection from session traces, self-report instructions in dispatch prompts, kill switch via preferences
-- **Preference engine** (M001/S02): Automatic promotion of repeated corrections to preferences with confidence scoring, observer engine with cross-scope pattern analysis and bounded guardrails, suggestion generation for skill refinement, wired into auto-mode execution loop
-- **Learning loop closure** (M001/S03): Dynamic recall injection of past corrections and preferences into dispatch prompts (token-budgeted, deduplicated, 10-slot max), correction/preference retirement via retireByCategory(), cross-project preference promotion to `~/.gsd/preferences.json` at 3+ project threshold
-- **Quality gating** (M001/S04): Configurable quality level (fast/standard/strict) on GSDPreferences, prompt injection of codebase scan/Context7/test/diff instructions via `{{quality}}` template variable, gate event recording with 5 gates × 4 outcomes persisted on UnitMetrics, dashboard overlay quality summary section
-- **Tech debt & passive monitoring** (M001/S05): Structured `.gsd/TECH-DEBT.md` register with sequential TD-NNN entries, auto-logging instructions at standard/strict quality levels, plan-vs-summary drift detection wired into auto.ts post-completion, drift observations flow into correction system
+- **Correction capture** (M001/S01): 14-category diagnosis taxonomy, JSONL persistence with rotation, programmatic detection from session traces (4 signals), self-report instructions in dispatch prompts, kill switch via preferences — 133 test assertions
+- **Preference engine** (M001/S02): Automatic promotion of repeated corrections to preferences with Bayesian confidence scoring, observer engine with cross-scope pattern analysis and bounded guardrails, suggestion generation for skill refinement — 93 test assertions
+- **Learning loop closure** (M001/S03): Dynamic recall injection into dispatch prompts (token-budgeted, deduplicated, 10-slot max), correction/preference retirement, cross-project preference promotion to `~/.gsd/preferences.json` at 3+ project threshold — 72 test assertions
+- **Quality gating** (M001/S04): Configurable quality level (fast/standard/strict) on GSDPreferences, prompt injection of codebase scan/Context7/test/diff instructions via `{{quality}}` template variable, gate event recording persisted on UnitMetrics, dashboard overlay quality summary — 124 test assertions
+- **Tech debt & passive monitoring** (M001/S05): Structured `.gsd/TECH-DEBT.md` register with sequential TD-NNN entries, auto-logging instructions at standard/strict quality levels, plan-vs-summary drift detection wired into auto.ts post-completion — 128 test assertions
+
+Total adaptive intelligence contract: 550 test assertions across 12 test suites, all passing.
 
 ## Architecture / Key Patterns
 
@@ -45,6 +47,8 @@ The auto-mode state machine that drives fresh-context-per-task execution through
 - **Corrections**: `corrections.ts` + `correction-detector.ts` for capture and detection
 - **Pattern learning**: `pattern-preferences.ts` + `observer.ts` for preference promotion and analysis
 - **Recall**: `recall.ts` for filtered injection of past corrections into dispatch prompts
+- **Retirement**: `retire.ts` for non-destructive correction/preference retirement
+- **Cross-project**: `promote-preference.ts` for user-level preference promotion
 - **Quality**: `quality-gating.ts` for quality-level-gated prompt instructions and gate events
 - **Tech debt**: `tech-debt.ts` for structured debt register I/O
 - **Passive monitoring**: `passive-monitor.ts` for plan-vs-summary drift detection
@@ -55,4 +59,4 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [ ] M001: Adaptive Intelligence — All 5 slices complete, awaiting milestone completion verification
+- [x] M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
