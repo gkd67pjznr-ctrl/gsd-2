@@ -12,6 +12,7 @@ import { deriveState } from "./state.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
 import { showSmartEntry, showQueue, showDiscuss } from "./guided-flow.js";
 import { startAuto, stopAuto, isAutoActive, isAutoPaused } from "./auto.js";
+import { startQuick } from "./quick.js";
 import {
   getGlobalGSDPreferencesPath,
   getLegacyGlobalGSDPreferencesPath,
@@ -147,8 +148,8 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
-      if (trimmed === "quick") {
-        ctx.ui.notify("GSD quick mode — coming soon.", "info");
+      if (trimmed === "quick" || trimmed.startsWith("quick ")) {
+        await startQuick(ctx, pi, trimmed);
         return;
       }
 

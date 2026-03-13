@@ -1298,7 +1298,7 @@ function buildQualityVar(): string {
  * the detector's SessionEntry format. The Pi format uses nested message
  * wrappers; the detector expects flat {type, tool, input, result} objects.
  */
-function transformSessionEntries(piEntries: unknown[]): DetectorSessionEntry[] {
+export function transformSessionEntries(piEntries: unknown[]): DetectorSessionEntry[] {
   const results: DetectorSessionEntry[] = [];
 
   // Track pending tool calls by ID for matching with results

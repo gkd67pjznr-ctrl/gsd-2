@@ -30,7 +30,8 @@ import { saveFile, formatContinue, loadFile, parseContinue, parseSummary } from 
 import { loadPrompt } from "./prompt-loader.js";
 import { deriveState } from "./state.js";
 import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData } from "./auto.js";
-import { isAutoActive as isStatusAutoActive } from "./status.js";
+import { isAutoActive as isStatusAutoActive, getGSDMode } from "./status.js";
+import { checkQuickEnd } from "./quick.js";
 import { buildRecallBlock } from "./recall.js";
 import { saveActivityLog } from "./activity-log.js";
 import { checkAutoStartAfterDiscuss } from "./guided-flow.js";
@@ -197,6 +198,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
     // If discuss phase just finished, start auto-mode
     if (checkAutoStartAfterDiscuss()) return;
+
+    // If quick mode just finished, capture corrections and reset
+    if (getGSDMode() === "quick") {
+      await checkQuickEnd(ctx, pi);
+      return;
+    }
 
     // If auto-mode is already running, advance to next unit
     if (!isAutoActive()) return;

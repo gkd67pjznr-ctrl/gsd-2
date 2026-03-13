@@ -62,9 +62,10 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 - **Cost tracking & lifecycle** (M002/S03): Embedding costs on UnitMetrics and dashboard, vector index rotation aligned with correction JSONL lifecycle — 17 test assertions
 
 - **Always-on recall** (M003/S01): Every Pi session in a GSD project gets recall injected via `before_agent_start` (not just auto-mode), unified status bar helper with `"gsd-mode"` key, chat/quick subcommand stubs — 27 test assertions
+- **Quick mode** (M003/S02): `/gsd quick --<description>` dispatches single-session task with quality instructions, recall injection via before_agent_start, correction capture, summary output to `.gsd/quick/<timestamp>/`, and loadTaskList for S03 handoff — 33 test assertions
 
 ## Milestone Sequence
 
 - [x] M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
 - [x] M002: Knowledge Infrastructure — Semantic Recall via Vectra — 3 slices, 9 tasks, 114 test assertions, completed 2026-03-12
-- [ ] M003: Conversational Modes & Lightweight Execution — S01 complete (27 assertions), S02/S03 pending
+- [ ] M003: Conversational Modes & Lightweight Execution — S01 complete (27 assertions), S02 complete (33 assertions), S03 pending

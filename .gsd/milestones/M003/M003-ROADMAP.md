@@ -52,7 +52,7 @@ This milestone is complete only when all are true:
 
 - [x] **S01: Always-On Recall & Status Bar** `risk:high` `depends:[]`
   > After this: every Pi session in a GSD project gets recall injected via `before_agent_start` (not just auto-mode), and a status bar shows the current GSD mode (idle/auto) — proven by unit tests and live Pi session exercise
-- [ ] **S02: Quick Mode** `risk:medium` `depends:[S01]`
+- [x] **S02: Quick Mode** `risk:medium` `depends:[S01]`
   > After this: user types `/gsd quick --fix the login button` and gets lightweight task execution through research→plan→execute→verify with recall injection, correction capture, and summary output in `.gsd/quick/` — status bar shows "quick" during execution
 - [ ] **S03: Chat Mode with Quick Handoff** `risk:medium` `depends:[S01,S02]`
   > After this: user types `/gsd chat` to start a brainstorming session with full recall, conversation is persisted to `.gsd/conversations/`, agent suggests `/gsd quick` when work is detected, task list created in chat is discoverable by `/gsd quick` — status bar shows "chat" during session

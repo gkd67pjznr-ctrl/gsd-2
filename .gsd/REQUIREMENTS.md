@@ -188,7 +188,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M003/S02
 - Supporting slices: M003/S01
-- Validation: unmapped
+- Validation: validated — 33 test assertions prove arg parsing, directory creation, prompt dispatch, status transitions, correction capture, error recovery, and task list parsing (M003/S02)
 - Notes: Quick tasks write to `.gsd/quick/<timestamp>/`, not milestones directory
 
 ### R022 — Status Bar
@@ -199,7 +199,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M003/S01
 - Supporting slices: M003/S02, M003/S03
-- Validation: partial — 16 test assertions prove setGSDStatus mode transitions, idle clears bar, isAutoActive guard, auto.ts migration; chat/quick modes untested (stubs only, implementations in S02/S03) (M003/S01)
+- Validation: partial — 16 test assertions prove setGSDStatus mode transitions, idle clears bar, isAutoActive guard, auto.ts migration (M003/S01); quick mode transitions proven with 27 assertions (M003/S02); chat mode untested (S03)
 - Notes: Unified "gsd-mode" key replaces old "gsd-auto" key. Helper function in status.ts.
 
 ### R023 — Always-On Recall
@@ -296,8 +296,8 @@ This file is the explicit capability and coverage contract for the project.
 | R018 | constraint | out-of-scope | none | none | n/a |
 | R019 | constraint | out-of-scope | none | none | n/a |
 | R020 | core-capability | active | M003/S03 | none | unmapped |
-| R021 | core-capability | active | M003/S02 | M003/S01 | unmapped |
-| R022 | core-capability | active | M003/S01 | M003/S02, M003/S03 | partial (M003/S01) |
+| R021 | core-capability | active | M003/S02 | M003/S01 | validated (M003/S02) |
+| R022 | core-capability | active | M003/S01 | M003/S02, M003/S03 | partial (M003/S01, M003/S02) |
 | R023 | core-capability | active | M003/S01 | none | validated (M003/S01) |
 | R024 | core-capability | active | M003/S03 | M003/S02 | unmapped |
 
@@ -305,6 +305,6 @@ This file is the explicit capability and coverage contract for the project.
 
 - Active requirements: 20
 - Mapped to slices: 20
-- Validated: 14 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015, R023)
-- Partially validated: 3 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven; R022 — idle/auto proven, chat/quick pending S02/S03)
+- Validated: 15 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015, R021, R023)
+- Partially validated: 3 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven; R022 — idle/auto/quick proven, chat pending S03)
 - Unmapped active requirements: 0
