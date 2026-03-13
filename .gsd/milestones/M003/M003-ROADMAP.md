@@ -50,7 +50,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Always-On Recall & Status Bar** `risk:high` `depends:[]`
+- [x] **S01: Always-On Recall & Status Bar** `risk:high` `depends:[]`
   > After this: every Pi session in a GSD project gets recall injected via `before_agent_start` (not just auto-mode), and a status bar shows the current GSD mode (idle/auto) — proven by unit tests and live Pi session exercise
 - [ ] **S02: Quick Mode** `risk:medium` `depends:[S01]`
   > After this: user types `/gsd quick --fix the login button` and gets lightweight task execution through research→plan→execute→verify with recall injection, correction capture, and summary output in `.gsd/quick/` — status bar shows "quick" during execution

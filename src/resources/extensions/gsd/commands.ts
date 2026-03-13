@@ -55,7 +55,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
     description: "GSD — Get Shit Done: /gsd auto|stop|status|queue|prefs|doctor|migrate",
 
     getArgumentCompletions: (prefix: string) => {
-      const subcommands = ["auto", "stop", "status", "queue", "discuss", "prefs", "doctor", "migrate"];
+      const subcommands = ["auto", "stop", "status", "queue", "discuss", "prefs", "doctor", "migrate", "chat", "quick"];
       const parts = prefix.trim().split(/\s+/);
 
       if (parts.length <= 1) {
@@ -142,13 +142,23 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "chat") {
+        ctx.ui.notify("GSD chat mode — coming soon.", "info");
+        return;
+      }
+
+      if (trimmed === "quick") {
+        ctx.ui.notify("GSD quick mode — coming soon.", "info");
+        return;
+      }
+
       if (trimmed === "") {
         await showSmartEntry(ctx, pi, process.cwd());
         return;
       }
 
       ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd prefs [global|project|status], /gsd doctor [audit|fix|heal] [M###/S##], or /gsd migrate <path>.`,
+        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd chat, /gsd quick, /gsd prefs [global|project|status], /gsd doctor [audit|fix|heal] [M###/S##], or /gsd migrate <path>.`,
         "warning",
       );
     },

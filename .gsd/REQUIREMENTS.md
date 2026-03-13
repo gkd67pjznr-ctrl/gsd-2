@@ -169,6 +169,61 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: validated — 34 test assertions prove drift detection for expansion/contraction/shift, documented deviation exclusion, empty/malformed input handling, non-throwing guarantee; grep confirms diffPlanVsSummary wired into auto.ts post-completion block gated by correction_capture kill switch and complete-slice unit type (S05)
 - Notes: Runs as a post-completion step in auto mode, not a background process. State transition detection deferred — plan-vs-summary drift is the implemented scope.
 
+### R020 — Chat Persistence
+- Class: core-capability
+- Status: active
+- Description: `/gsd chat` sessions are persisted to `.gsd/conversations/` as timestamped markdown with structured summaries
+- Why it matters: Brainstorming sessions are lost without persistence — summaries enable recall and handoff to quick mode
+- Source: user
+- Primary owning slice: M003/S03
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Markdown format chosen for human readability during review
+
+### R021 — Quick Mode
+- Class: core-capability
+- Status: active
+- Description: `/gsd quick --<description>` executes lightweight tasks through research→plan→execute→verify phases with recall injection, correction capture, and summary output in `.gsd/quick/`
+- Why it matters: Not every task needs milestone ceremony — quick mode fills the gap between chat and auto
+- Source: user
+- Primary owning slice: M003/S02
+- Supporting slices: M003/S01
+- Validation: unmapped
+- Notes: Quick tasks write to `.gsd/quick/<timestamp>/`, not milestones directory
+
+### R022 — Status Bar
+- Class: core-capability
+- Status: active
+- Description: A persistent status bar shows the current GSD mode (idle/auto/chat/quick) and updates on all mode transitions
+- Why it matters: Users need to know which mode is active at a glance
+- Source: user
+- Primary owning slice: M003/S01
+- Supporting slices: M003/S02, M003/S03
+- Validation: partial — 16 test assertions prove setGSDStatus mode transitions, idle clears bar, isAutoActive guard, auto.ts migration; chat/quick modes untested (stubs only, implementations in S02/S03) (M003/S01)
+- Notes: Unified "gsd-mode" key replaces old "gsd-auto" key. Helper function in status.ts.
+
+### R023 — Always-On Recall
+- Class: core-capability
+- Status: active
+- Description: Every Pi session in a GSD project gets recall injected via `before_agent_start`, not just auto-mode
+- Why it matters: Recall should benefit all interactions, not just auto-mode dispatch
+- Source: user
+- Primary owning slice: M003/S01
+- Supporting slices: none
+- Validation: validated — 11 test assertions prove recall injection in before_agent_start, auto-mode skip (avoid duplication), empty recall handling, append to existing prompt (M003/S01)
+- Notes: Uses isAutoActive() gate to avoid duplicating recall that auto-mode already injects via {{corrections}} template variable
+
+### R024 — Chat-to-Quick Handoff
+- Class: core-capability
+- Status: active
+- Description: A chat session that produces a task list can hand off to `/gsd quick` which loads and executes that task list
+- Why it matters: Natural brainstorming-to-execution flow without manual copy-paste
+- Source: user
+- Primary owning slice: M003/S03
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: File-based handoff via task list in `.gsd/conversations/`
+
 ## Deferred
 
 ### R016 — Gate-to-Correction Attribution
@@ -240,11 +295,16 @@ This file is the explicit capability and coverage contract for the project.
 | R017 | differentiator | deferred | none | none | unmapped |
 | R018 | constraint | out-of-scope | none | none | n/a |
 | R019 | constraint | out-of-scope | none | none | n/a |
+| R020 | core-capability | active | M003/S03 | none | unmapped |
+| R021 | core-capability | active | M003/S02 | M003/S01 | unmapped |
+| R022 | core-capability | active | M003/S01 | M003/S02, M003/S03 | partial (M003/S01) |
+| R023 | core-capability | active | M003/S01 | none | validated (M003/S01) |
+| R024 | core-capability | active | M003/S03 | M003/S02 | unmapped |
 
 ## Coverage Summary
 
-- Active requirements: 15
-- Mapped to slices: 15
-- Validated: 13 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015)
-- Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven, user confirmation and permission checks pending)
+- Active requirements: 20
+- Mapped to slices: 20
+- Validated: 14 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015, R023)
+- Partially validated: 3 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven; R022 — idle/auto proven, chat/quick pending S02/S03)
 - Unmapped active requirements: 0

@@ -1,10 +1,14 @@
 # GSD State
 
 **Active Milestone:** M003 — Conversational Modes & Lightweight Execution
-**Phase:** roadmap planned, ready for slice execution
+**Active Slice:** S02 — Quick Mode (next up)
+**Phase:** idle (S01 complete, S02 not started)
 
 ## Current Milestone
-- M003: Roadmap written with 3 slices (S01: Always-On Recall & Status Bar, S02: Quick Mode, S03: Chat Mode with Quick Handoff)
+- M003: Roadmap with 3 slices; S01 complete, S02 next
+
+## Completed Slices (M003)
+- S01: Always-On Recall & Status Bar — 27 test assertions, completed 2026-03-12
 
 ## Completed Milestones
 - M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
@@ -13,7 +17,8 @@
 ## Total Test Assertions
 - M001: 550
 - M002: 114
-- Total: 664
+- M003 (in progress): 27
+- Total: 691
 
 ## Next Action
-Run `/gsd auto` to begin M003/S01 execution.
+Start S02: Quick Mode

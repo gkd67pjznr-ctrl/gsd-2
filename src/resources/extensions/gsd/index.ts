@@ -30,6 +30,8 @@ import { saveFile, formatContinue, loadFile, parseContinue, parseSummary } from 
 import { loadPrompt } from "./prompt-loader.js";
 import { deriveState } from "./state.js";
 import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData } from "./auto.js";
+import { isAutoActive as isStatusAutoActive } from "./status.js";
+import { buildRecallBlock } from "./recall.js";
 import { saveActivityLog } from "./activity-log.js";
 import { checkAutoStartAfterDiscuss } from "./guided-flow.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
@@ -166,8 +168,19 @@ export default function (pi: ExtensionAPI) {
       ].join("\n");
     }
 
+    // Inject recall block for non-auto sessions (auto-mode handles its own recall)
+    let recallBlock = "";
+    if (!isStatusAutoActive()) {
+      try {
+        const recall = await buildRecallBlock({ cwd: process.cwd() });
+        if (recall) recallBlock = `\n\n${recall}`;
+      } catch {
+        // Non-throwing — recall failures must not block session start
+      }
+    }
+
     return {
-      systemPrompt: `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${newSkillsBlock}${worktreeBlock}`,
+      systemPrompt: `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${newSkillsBlock}${worktreeBlock}${recallBlock}`,
       ...(injection
         ? {
           message: {

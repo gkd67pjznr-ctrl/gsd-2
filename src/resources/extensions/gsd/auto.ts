@@ -82,6 +82,7 @@ import {
   getGateEvents,
   clearGateEvents,
 } from "./quality-gating.ts";
+import { setGSDStatus } from "./status.js";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -284,7 +285,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   currentMilestoneId = null;
   cachedSliceProgress = null;
   pendingCrashRecovery = null;
-  ctx?.ui.setStatus("gsd-auto", undefined);
+  if (ctx) setGSDStatus(ctx, "idle");
   ctx?.ui.setWidget("gsd-progress", undefined);
 
   // Restore the user's original model
@@ -311,7 +312,7 @@ export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Pro
   // Preserve: lastUnit, currentUnit, basePath, verbose, cmdCtx,
   // completedUnits, autoStartTime, currentMilestoneId, originalModelId
   // — all needed for resume and dashboard display
-  ctx?.ui.setStatus("gsd-auto", "paused");
+  if (ctx) setGSDStatus(ctx, "idle");
   ctx?.ui.setWidget("gsd-progress", undefined);
   ctx?.ui.notify(
     "Auto-mode paused (Escape). Type to interact, or /gsd auto to resume.",
@@ -335,7 +336,7 @@ export async function startAuto(
     basePath = base;
     // Re-initialize metrics in case ledger was lost during pause
     if (!getLedger()) initMetrics(base);
-    ctx.ui.setStatus("gsd-auto", "auto");
+    setGSDStatus(ctx, "auto");
     ctx.ui.notify("Auto-mode resumed.", "info");
     await dispatchNextUnit(ctx, pi);
     return;
@@ -430,7 +431,7 @@ export async function startAuto(
     snapshotSkills();
   }
 
-  ctx.ui.setStatus("gsd-auto", "auto");
+  setGSDStatus(ctx, "auto");
   const pendingCount = state.registry.filter(m => m.status !== 'complete').length;
   const scopeMsg = pendingCount > 1
     ? `Will loop through ${pendingCount} milestones.`
@@ -1066,7 +1067,7 @@ async function dispatchNextUnit(
   });
 
   // Status bar + progress widget
-  ctx.ui.setStatus("gsd-auto", "auto");
+  setGSDStatus(ctx, "auto");
   if (mid) updateSliceProgressCache(basePath, mid, state.activeSlice?.id);
   updateProgressWidget(ctx, unitType, unitId, state);
 
