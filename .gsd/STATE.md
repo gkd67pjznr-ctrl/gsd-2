@@ -12,5 +12,8 @@
 - D035: Passive monitoring runs only after complete-slice, not after every task
 - D036: Drift observations use existing correction categories
 
+## Queued Milestones
+- M002: Knowledge Infrastructure — Qdrant & Neo4j Integration Research
+
 ## Next Action
-No active milestone. Run `/gsd` to start next milestone or `/gsd queue` to check queued work.
+Run `/gsd` to start M002 or `/gsd queue` to check queued work.
