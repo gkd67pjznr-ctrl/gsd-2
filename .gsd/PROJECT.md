@@ -4,7 +4,7 @@
 
 GSD 2 (Get Shit Done) is a standalone TypeScript CLI built on the Pi SDK that structures AI-assisted coding into milestones → slices → tasks, with programmatic session management, auto mode, crash recovery, cost tracking, and clean git strategy. It's a complete rewrite of the original GSD prompt framework.
 
-All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified (M001 complete): correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring. M002 (semantic recall via Vectra) complete — semantic similarity search augments category-based recall in dispatch prompts, with async embedding, graceful degradation, cost tracking, and index lifecycle management. 114 new test assertions across 3 slices, 9 tasks.
+All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified (M001 complete): correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring. M002 (semantic recall via Vectra) complete — semantic similarity search augments category-based recall in dispatch prompts, with async embedding, graceful degradation, cost tracking, and index lifecycle management. M003 (conversational modes) complete — `/gsd chat` for brainstorming with recall and persistence, `/gsd quick` for lightweight task execution, always-on recall injection, unified status bar, and chat-to-quick task list handoff. 761 total test assertions across 3 milestones.
 
 ## Core Value
 
@@ -63,9 +63,10 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 - **Always-on recall** (M003/S01): Every Pi session in a GSD project gets recall injected via `before_agent_start` (not just auto-mode), unified status bar helper with `"gsd-mode"` key, chat/quick subcommand stubs — 27 test assertions
 - **Quick mode** (M003/S02): `/gsd quick --<description>` dispatches single-session task with quality instructions, recall injection via before_agent_start, correction capture, summary output to `.gsd/quick/<timestamp>/`, and loadTaskList for S03 handoff — 33 test assertions
+- **Chat mode with quick handoff** (M003/S03): `/gsd chat` starts brainstorming with recall, persists to `.gsd/conversations/<timestamp>/`, bare `/gsd quick` discovers and executes chat task lists — 31 test assertions
 
 ## Milestone Sequence
 
 - [x] M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
 - [x] M002: Knowledge Infrastructure — Semantic Recall via Vectra — 3 slices, 9 tasks, 114 test assertions, completed 2026-03-12
-- [ ] M003: Conversational Modes & Lightweight Execution — S01 complete (27 assertions), S02 complete (33 assertions), S03 pending
+- [x] M003: Conversational Modes & Lightweight Execution — 3 slices, 6 tasks, 97 test assertions, completed 2026-03-12

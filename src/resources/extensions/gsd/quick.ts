@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { setGSDStatus, getGSDMode } from "./status.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { resolveQualityLevel, buildQualityInstructions } from "./quality-gating.js";
+import { findRecentTaskList } from "./chat.js";
+import { loadTaskList } from "./task-list.js";
 import { transformSessionEntries } from "./auto.js";
 import { detectCorrections } from "./correction-detector.js";
 import type { SessionEntry as DetectorSessionEntry } from "./correction-detector.js";
@@ -47,11 +49,23 @@ export async function startQuick(
   pi: ExtensionAPI,
   rawArgs: string,
 ): Promise<void> {
-  const description = parseQuickDescription(rawArgs);
+  let description = parseQuickDescription(rawArgs);
 
   if (!description) {
-    ctx.ui.notify("Usage: /gsd quick --describe the task", "warning");
-    return;
+    // Try to discover a task list from a recent chat session
+    const taskListPath = findRecentTaskList();
+    if (taskListPath) {
+      const items = loadTaskList(taskListPath);
+      const undone = items.filter((t) => !t.done);
+      if (undone.length > 0) {
+        description = "Execute task list from chat:\n" + undone.map((t) => `- ${t.title}`).join("\n");
+      }
+    }
+
+    if (!description) {
+      ctx.ui.notify("Usage: /gsd quick --describe the task", "warning");
+      return;
+    }
   }
 
   // Create output directory

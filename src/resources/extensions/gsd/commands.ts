@@ -13,6 +13,7 @@ import { GSDDashboardOverlay } from "./dashboard-overlay.js";
 import { showSmartEntry, showQueue, showDiscuss } from "./guided-flow.js";
 import { startAuto, stopAuto, isAutoActive, isAutoPaused } from "./auto.js";
 import { startQuick } from "./quick.js";
+import { startChat, endChat } from "./chat.js";
 import {
   getGlobalGSDPreferencesPath,
   getLegacyGlobalGSDPreferencesPath,
@@ -143,8 +144,13 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "chat end") {
+        await endChat(ctx, pi);
+        return;
+      }
+
       if (trimmed === "chat") {
-        ctx.ui.notify("GSD chat mode — coming soon.", "info");
+        await startChat(ctx, pi);
         return;
       }
 

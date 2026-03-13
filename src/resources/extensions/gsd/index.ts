@@ -32,6 +32,7 @@ import { deriveState } from "./state.js";
 import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData } from "./auto.js";
 import { isAutoActive as isStatusAutoActive, getGSDMode } from "./status.js";
 import { checkQuickEnd } from "./quick.js";
+import { checkChatEnd } from "./chat.js";
 import { buildRecallBlock } from "./recall.js";
 import { saveActivityLog } from "./activity-log.js";
 import { checkAutoStartAfterDiscuss } from "./guided-flow.js";
@@ -202,6 +203,12 @@ export default function (pi: ExtensionAPI) {
     // If quick mode just finished, capture corrections and reset
     if (getGSDMode() === "quick") {
       await checkQuickEnd(ctx, pi);
+      return;
+    }
+
+    // If chat mode just finished, capture corrections and reset
+    if (getGSDMode() === "chat") {
+      await checkChatEnd(ctx, pi);
       return;
     }
 

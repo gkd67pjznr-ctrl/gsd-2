@@ -177,7 +177,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M003/S03
 - Supporting slices: none
-- Validation: unmapped
+- Validation: validated — 17 test assertions prove chat lifecycle creates output dirs, dispatches prompts, resets status; prompt template defines markdown persistence format (M003/S03)
 - Notes: Markdown format chosen for human readability during review
 
 ### R021 — Quick Mode
@@ -199,7 +199,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M003/S01
 - Supporting slices: M003/S02, M003/S03
-- Validation: partial — 16 test assertions prove setGSDStatus mode transitions, idle clears bar, isAutoActive guard, auto.ts migration (M003/S01); quick mode transitions proven with 27 assertions (M003/S02); chat mode untested (S03)
+- Validation: validated — 16 test assertions prove setGSDStatus mode transitions, idle clears bar, isAutoActive guard, auto.ts migration (M003/S01); quick mode transitions proven with 27 assertions (M003/S02); chat mode transitions proven with 17 assertions (M003/S03)
 - Notes: Unified "gsd-mode" key replaces old "gsd-auto" key. Helper function in status.ts.
 
 ### R023 — Always-On Recall
@@ -221,7 +221,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M003/S03
 - Supporting slices: M003/S02
-- Validation: unmapped
+- Validation: validated — 14 test assertions prove findRecentTaskList discovery, task list loading, undone item filtering, quick mode dispatch with chat task list, fallback on empty directory (M003/S03)
 - Notes: File-based handoff via task list in `.gsd/conversations/`
 
 ## Deferred
@@ -295,16 +295,16 @@ This file is the explicit capability and coverage contract for the project.
 | R017 | differentiator | deferred | none | none | unmapped |
 | R018 | constraint | out-of-scope | none | none | n/a |
 | R019 | constraint | out-of-scope | none | none | n/a |
-| R020 | core-capability | active | M003/S03 | none | unmapped |
+| R020 | core-capability | active | M003/S03 | none | validated (M003/S03) |
 | R021 | core-capability | active | M003/S02 | M003/S01 | validated (M003/S02) |
-| R022 | core-capability | active | M003/S01 | M003/S02, M003/S03 | partial (M003/S01, M003/S02) |
+| R022 | core-capability | active | M003/S01 | M003/S02, M003/S03 | validated (M003/S01, M003/S02, M003/S03) |
 | R023 | core-capability | active | M003/S01 | none | validated (M003/S01) |
-| R024 | core-capability | active | M003/S03 | M003/S02 | unmapped |
+| R024 | core-capability | active | M003/S03 | M003/S02 | validated (M003/S03) |
 
 ## Coverage Summary
 
 - Active requirements: 20
 - Mapped to slices: 20
-- Validated: 15 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015, R021, R023)
-- Partially validated: 3 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven; R022 — idle/auto/quick proven, chat pending S03)
+- Validated: 18 (R002, R003, R004, R005, R007, R008, R009, R010, R011, R012, R013, R014, R015, R020, R021, R022, R023, R024)
+- Partially validated: 2 (R001 — contract proven, runtime pending; R006 — 4/6 guardrails proven)
 - Unmapped active requirements: 0
