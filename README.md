@@ -2,11 +2,11 @@
 
 # GSD 2
 
-**The evolution of [Get Shit Done](https://github.com/glittercowboy/get-shit-done) — now a real coding agent.**
+**The evolution of [Get Shit Done](https://github.com/gsd-build/get-shit-done) — now a real coding agent.**
 
 [![npm version](https://img.shields.io/npm/v/gsd-pi?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/gsd-pi)
 [![npm downloads](https://img.shields.io/npm/dm/gsd-pi?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/gsd-pi)
-[![GitHub stars](https://img.shields.io/github/stars/glittercowboy/gsd-pi?style=for-the-badge&logo=github&color=181717)](https://github.com/glittercowboy/gsd-pi)
+[![GitHub stars](https://img.shields.io/github/stars/gsd-build/GSD-2?style=for-the-badge&logo=github&color=181717)](https://github.com/gsd-build/GSD-2)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 
 The original GSD went viral as a prompt framework for Claude Code. It worked, but it was fighting the tool — injecting prompts through slash commands, hoping the LLM would follow instructions, with no actual control over context windows, sessions, or execution.
@@ -47,6 +47,8 @@ GSD v2 solves all of these because it's not a prompt framework anymore — it's 
 | Skill discovery | None | Auto-detect and install relevant skills during research |
 
 ### Migrating from v1
+
+> **Note:** Migration works best with a `ROADMAP.md` file for milestone structure. Without one, milestones are inferred from the `phases/` directory.
 
 If you have projects with `.planning` directories from the original Get Shit Done, you can migrate them to GSD-2's `.gsd` format:
 
@@ -122,16 +124,18 @@ Auto mode is a state machine driven by files on disk. It reads `.gsd/STATE.md`, 
 
 9. **Escape hatch** — Press Escape to pause. The conversation is preserved. Interact with the agent, inspect what happened, or just `/gsd auto` to resume from disk state.
 
-### The `/gsd` Wizard
+### `/gsd` and `/gsd next` — Step Mode
 
-When you're not in auto mode, `/gsd` reads disk state and shows contextual options:
+By default, `/gsd` runs in **step mode**: the same state machine as auto mode, but it pauses between units with a wizard showing what completed and what's next. You advance one step at a time, review the output, and continue when ready.
 
 - **No `.gsd/` directory** → Start a new project. Discussion flow captures your vision, constraints, and preferences.
 - **Milestone exists, no roadmap** → Discuss or research the milestone.
-- **Roadmap exists, slices pending** → Plan the next slice, or jump straight to auto.
+- **Roadmap exists, slices pending** → Plan the next slice, execute one task, or switch to auto.
 - **Mid-task** → Resume from where you left off.
 
-The wizard is the on-ramp. Auto mode is the highway.
+`/gsd next` is an explicit alias for step mode. You can switch from step → auto mid-session via the wizard.
+
+Step mode is the on-ramp. Auto mode is the highway.
 
 ---
 
@@ -170,7 +174,7 @@ gsd
 
 GSD opens an interactive agent session. From there, you have two ways to work:
 
-**`/gsd` — guided mode.** Type `/gsd` and GSD reads your project state and walks you through whatever's next. No project yet? It helps you describe what you want to build. Roadmap exists? It plans the next slice. Mid-task? It resumes. This is the hands-on mode where you work *with* the agent step by step.
+**`/gsd` — step mode.** Type `/gsd` and GSD executes one unit of work at a time, pausing between each with a wizard showing what completed and what's next. Same state machine as auto mode, but you stay in the loop. No project yet? It starts the discussion flow. Roadmap exists? It plans or executes the next step.
 
 **`/gsd auto` — autonomous mode.** Type `/gsd auto` and walk away. GSD researches, plans, executes, verifies, commits, and advances through every slice until the milestone is complete. Fresh context window per task. No babysitting.
 
@@ -196,13 +200,14 @@ Both terminals read and write the same `.gsd/` files on disk. Your decisions in 
 
 ### First launch
 
-On first run, GSD prompts for optional API keys (Brave Search, Context7, Jina) for web research and documentation tools. All optional — press Enter to skip any.
+On first run, GSD launches a branded setup wizard that walks you through LLM provider selection (OAuth or API key), then optional tool API keys (Brave Search, Context7, Jina, Slack, Discord). Every step is skippable — press Enter to skip any. If you have an existing Pi installation, your provider credentials (LLM and tool keys) are imported automatically. Run `gsd config` anytime to re-run the wizard.
 
 ### Commands
 
 | Command | What it does |
 |---------|-------------|
-| `/gsd` | Guided mode — reads project state, walks you through what's next |
+| `/gsd` | Step mode — executes one unit at a time, pauses between each |
+| `/gsd next` | Explicit step mode (same as bare `/gsd`) |
 | `/gsd auto` | Autonomous mode — researches, plans, executes, commits, repeats |
 | `/gsd stop` | Stop auto mode gracefully |
 | `/gsd discuss` | Discuss architecture and decisions (works alongside auto mode) |
@@ -211,7 +216,16 @@ On first run, GSD prompts for optional API keys (Brave Search, Context7, Jina) f
 | `/gsd prefs` | Model selection, timeouts, budget ceiling |
 | `/gsd migrate` | Migrate a v1 `.planning` directory to `.gsd` format |
 | `/gsd doctor` | Validate `.gsd/` integrity, find and fix issues |
+| `/worktree` (`/wt`) | Git worktree lifecycle — create, switch, merge, remove |
+| `/voice` | Toggle real-time speech-to-text (macOS only) |
+| `/exit` | Graceful shutdown — saves session state before exiting |
+| `/kill` | Kill GSD process immediately |
+| `/clear` | Start a new session (alias for `/new`) |
 | `Ctrl+Alt+G` | Toggle dashboard overlay |
+| `Ctrl+Alt+V` | Toggle voice transcription |
+| `Ctrl+Alt+B` | Show background shell processes |
+| `gsd config` | Re-run the setup wizard (LLM provider + tool keys) |
+| `gsd --continue` (`-c`) | Resume the most recent session for the current directory |
 
 ---
 
@@ -240,17 +254,18 @@ Branch-per-slice with squash merge. Fully automated.
 
 ```
 main:
-  feat(M001/S03): auth and session management
+  docs(M001/S04): workflow documentation and examples
+  fix(M001/S03): bug fixes and doc corrections
   feat(M001/S02): API endpoints and middleware
   feat(M001/S01): data model and type system
 
-gsd/M001/S01 (preserved):
+gsd/M001/S01 (deleted after merge):
   feat(S01/T03): file writer with round-trip fidelity
   feat(S01/T02): markdown parser for plan files
   feat(S01/T01): core types and interfaces
 ```
 
-One commit per slice on main. Per-task history preserved on branches. Git bisect works. Individual slices are revertable.
+One commit per slice on main. Squash commits are the permanent record — branches are deleted after merge. Git bisect works. Individual slices are revertable.
 
 ### Verification
 
@@ -311,16 +326,20 @@ budget_ceiling: 50.00
 
 ### Bundled Tools
 
-GSD ships with 9 extensions, all loaded automatically:
+GSD ships with 13 extensions, all loaded automatically:
 
 | Extension | What it provides |
 |-----------|-----------------|
 | **GSD** | Core workflow engine, auto mode, commands, dashboard |
 | **Browser Tools** | Playwright-based browser for UI verification |
-| **Search the Web** | Brave Search + Jina page extraction |
+| **Search the Web** | Brave Search, Tavily, or Jina page extraction |
+| **Google Search** | Gemini-powered web search with AI-synthesized answers |
 | **Context7** | Up-to-date library/framework documentation |
 | **Background Shell** | Long-running process management with readiness detection |
 | **Subagent** | Delegated tasks with isolated context windows |
+| **Mac Tools** | macOS native app automation via Accessibility APIs |
+| **MCPorter** | Lazy on-demand MCP server integration |
+| **Voice** | Real-time speech-to-text transcription (macOS) |
 | **Slash Commands** | Custom command creation |
 | **Ask User Questions** | Structured user input with single/multi-select |
 | **Secure Env Collect** | Masked secret collection without manual .env editing |
@@ -345,12 +364,13 @@ GSD is a TypeScript application that embeds the Pi coding agent SDK.
 gsd (CLI binary)
   └─ loader.ts          Sets PI_PACKAGE_DIR, GSD env vars, dynamic-imports cli.ts
       └─ cli.ts         Wires SDK managers, loads extensions, starts InteractiveMode
-          ├─ wizard.ts       First-run API key collection (Brave/Context7/Jina)
+          ├─ onboarding.ts   First-run setup wizard (LLM provider + tool keys)
+          ├─ wizard.ts       Env hydration from stored auth.json credentials
           ├─ app-paths.ts    ~/.gsd/agent/, ~/.gsd/sessions/, auth.json
           ├─ resource-loader.ts  Syncs bundled extensions + agents to ~/.gsd/agent/
           └─ src/resources/
               ├─ extensions/gsd/    Core GSD extension (auto, state, commands, ...)
-              ├─ extensions/...     10 supporting extensions
+              ├─ extensions/...     12 supporting extensions
               ├─ agents/            scout, researcher, worker
               ├─ AGENTS.md          Agent routing instructions
               └─ GSD-WORKFLOW.md    Manual bootstrap protocol
@@ -373,6 +393,8 @@ gsd (CLI binary)
 
 Optional:
 - Brave Search API key (web research)
+- Tavily API key (web research — alternative to Brave)
+- Google Gemini API key (web research via Gemini Search grounding)
 - Context7 API key (library docs)
 - Jina API key (page extraction)
 
@@ -412,7 +434,9 @@ Use expensive models where quality matters (planning, complex execution) and che
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=gsd-build/GSD-2&type=Date)](https://star-history.com/#gsd-build/GSD-2&Date)
+<a href="https://star-history.com/#gsd-build/gsd-2&Date">
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=gsd-build/gsd-2&type=Date" />
+</a>
 
 ---
 

@@ -4,14 +4,14 @@
  * One command, one wizard. Routes to smart entry or status.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveState } from "./state.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
-import { showSmartEntry, showQueue, showDiscuss } from "./guided-flow.js";
-import { startAuto, stopAuto, isAutoActive, isAutoPaused } from "./auto.js";
+import { showQueue, showDiscuss } from "./guided-flow.js";
+import { startAuto, stopAuto, isAutoActive, isAutoPaused, isStepMode } from "./auto.js";
 import { startQuick } from "./quick.js";
 import { startChat, endChat } from "./chat.js";
 import {
@@ -33,6 +33,7 @@ import {
 } from "./doctor.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { handleMigrate } from "./migrate/command.js";
+import { handleRemote } from "../remote-questions/remote-command.js";
 
 function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
@@ -54,10 +55,10 @@ function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportT
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd auto|stop|status|queue|prefs|doctor|migrate",
+    description: "GSD — Get Shit Done: /gsd next|auto|stop|status|queue|prefs|doctor|migrate|remote|chat|quick",
 
     getArgumentCompletions: (prefix: string) => {
-      const subcommands = ["auto", "stop", "status", "queue", "discuss", "prefs", "doctor", "migrate", "chat", "quick"];
+      const subcommands = ["next", "auto", "stop", "status", "queue", "discuss", "prefs", "doctor", "migrate", "remote", "chat", "quick"];
       const parts = prefix.trim().split(/\s+/);
 
       if (parts.length <= 1) {
@@ -78,6 +79,13 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return ["global", "project", "status"]
           .filter((cmd) => cmd.startsWith(subPrefix))
           .map((cmd) => ({ value: `prefs ${cmd}`, label: cmd }));
+      }
+
+      if (parts[0] === "remote" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        return ["slack", "discord", "status", "disconnect"]
+          .filter((cmd) => cmd.startsWith(subPrefix))
+          .map((cmd) => ({ value: `remote ${cmd}`, label: cmd }));
       }
 
       if (parts[0] === "doctor") {
@@ -114,6 +122,12 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "next" || trimmed.startsWith("next ")) {
+        const verboseMode = trimmed.includes("--verbose");
+        await startAuto(ctx, pi, process.cwd(), verboseMode, { step: true });
+        return;
+      }
+
       if (trimmed === "auto" || trimmed.startsWith("auto ")) {
         const verboseMode = trimmed.includes("--verbose");
         await startAuto(ctx, pi, process.cwd(), verboseMode);
@@ -144,6 +158,11 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "remote" || trimmed.startsWith("remote ")) {
+        await handleRemote(trimmed.replace(/^remote\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
       if (trimmed === "chat end") {
         await endChat(ctx, pi);
         return;
@@ -160,12 +179,13 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
       }
 
       if (trimmed === "") {
-        await showSmartEntry(ctx, pi, process.cwd());
+        // Bare /gsd defaults to step mode
+        await startAuto(ctx, pi, process.cwd(), false, { step: true });
         return;
       }
 
       ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd chat, /gsd quick, /gsd prefs [global|project|status], /gsd doctor [audit|fix|heal] [M###/S##], or /gsd migrate <path>.`,
+        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd next, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd chat, /gsd quick, /gsd prefs [global|project|status], /gsd doctor [audit|fix|heal] [M###/S##], /gsd migrate <path>, or /gsd remote [slack|discord|status|disconnect].`,
         "warning",
       );
     },
@@ -198,7 +218,7 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 }
 
 export async function fireStatusViaCommand(
-  ctx: import("@mariozechner/pi-coding-agent").ExtensionContext,
+  ctx: import("@gsd/pi-coding-agent").ExtensionContext,
 ): Promise<void> {
   await handleStatus(ctx as ExtensionCommandContext);
 }

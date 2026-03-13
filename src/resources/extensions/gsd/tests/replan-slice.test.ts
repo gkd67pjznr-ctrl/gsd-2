@@ -385,7 +385,6 @@ console.log('\n=== prompt: replan-slice template loads and substitutes variables
     sliceTitle: 'Test Slice',
     slicePath: '.gsd/milestones/M001/slices/S01',
     planPath: '.gsd/milestones/M001/slices/S01/S01-PLAN.md',
-    blockerTaskId: 'T02',
     inlinedContext: '## Inlined Context\n\nTest context here.',
   });
 
@@ -393,7 +392,6 @@ console.log('\n=== prompt: replan-slice template loads and substitutes variables
   assert(prompt.includes('S01'), 'prompt contains sliceId');
   assert(prompt.includes('Test Slice'), 'prompt contains sliceTitle');
   assert(prompt.includes('.gsd/milestones/M001/slices/S01/S01-PLAN.md'), 'prompt contains planPath');
-  assert(prompt.includes('T02'), 'prompt contains blockerTaskId');
   assert(prompt.includes('Test context here'), 'prompt contains inlined context');
 }
 

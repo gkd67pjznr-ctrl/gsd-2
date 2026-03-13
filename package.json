@@ -1,6 +1,6 @@
 {
   "name": "gsd-pi",
-  "version": "0.3.0",
+  "version": "2.7.1",
   "description": "GSD — Get Shit Done coding agent",
   "license": "MIT",
   "repository": {
@@ -12,12 +12,16 @@
     "url": "https://github.com/glittercowboy/gsd-pi/issues"
   },
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "gsd": "dist/loader.js",
     "gsd-cli": "dist/loader.js"
   },
   "files": [
     "dist",
+    "packages",
     "pkg",
     "src/resources",
     "scripts/postinstall.js",
@@ -32,19 +36,38 @@
     "node": ">=20.6.0"
   },
   "scripts": {
-    "build": "tsc && npm run copy-themes",
-    "copy-themes": "node -e \"const{mkdirSync,cpSync}=require('fs');const{resolve}=require('path');const src=resolve(__dirname,'node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/theme');mkdirSync('pkg/dist/modes/interactive/theme',{recursive:true});cpSync(src,'pkg/dist/modes/interactive/theme',{recursive:true})\"",
-    "test": "node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test 'src/resources/extensions/gsd/tests/*.test.ts' 'src/resources/extensions/gsd/tests/*.test.mjs' 'src/tests/*.test.ts'",
+    "build:pi-tui": "npm run build -w @gsd/pi-tui",
+    "build:pi-ai": "npm run build -w @gsd/pi-ai",
+    "build:pi-agent-core": "npm run build -w @gsd/pi-agent-core",
+    "build:pi-coding-agent": "npm run build -w @gsd/pi-coding-agent",
+    "build:pi": "npm run build:pi-tui && npm run build:pi-ai && npm run build:pi-agent-core && npm run build:pi-coding-agent",
+    "build": "npm run build:pi && tsc && npm run copy-themes",
+    "copy-themes": "node -e \"const{mkdirSync,cpSync}=require('fs');const{resolve}=require('path');const src=resolve(__dirname,'packages/pi-coding-agent/dist/modes/interactive/theme');mkdirSync('pkg/dist/modes/interactive/theme',{recursive:true});cpSync(src,'pkg/dist/modes/interactive/theme',{recursive:true})\"",
+    "test": "node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/resources/extensions/gsd/tests/*.test.ts src/resources/extensions/gsd/tests/*.test.mjs src/tests/*.test.ts",
     "dev": "tsc --watch",
     "postinstall": "node scripts/postinstall.js",
+    "pi:install-global": "node scripts/install-pi-global.js",
+    "pi:uninstall-global": "node scripts/uninstall-pi-global.js",
     "sync-pkg-version": "node scripts/sync-pkg-version.cjs",
     "prepublishOnly": "npm run sync-pkg-version && npm run build"
   },
   "dependencies": {
+    "@clack/prompts": "^1.1.0",
+    "@gsd/pi-agent-core": "*",
+    "@gsd/pi-ai": "*",
+    "@gsd/pi-coding-agent": "*",
+    "@gsd/pi-tui": "*",
     "@mariozechner/pi-coding-agent": "^0.57.1",
+    "picocolors": "^1.1.1",
     "playwright": "^1.58.2",
     "vectra": "^0.12.3"
   },
+  "bundleDependencies": [
+    "@gsd/pi-agent-core",
+    "@gsd/pi-ai",
+    "@gsd/pi-coding-agent",
+    "@gsd/pi-tui"
+  ],
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.4.0"

@@ -16,11 +16,11 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { Message } from "@mariozechner/pi-ai";
-import { StringEnum } from "@mariozechner/pi-ai";
-import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+import type { AgentToolResult } from "@gsd/pi-agent-core";
+import type { Message } from "@gsd/pi-ai";
+import { StringEnum } from "@gsd/pi-ai";
+import { type ExtensionAPI, getMarkdownTheme } from "@gsd/pi-coding-agent";
+import { Container, Markdown, Spacer, Text } from "@gsd/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 
@@ -53,7 +53,7 @@ function formatUsageStats(
 	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
 	if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
 	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
-	if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
+	if (usage.cost) parts.push(`$${(Number(usage.cost) || 0).toFixed(4)}`);
 	if (usage.contextTokens && usage.contextTokens > 0) {
 		parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
 	}
@@ -654,8 +654,7 @@ export default function (pi: ExtensionAPI) {
 					const output = isError
 						? (r.errorMessage || r.stderr || getFinalOutput(r.messages) || "(no output)")
 						: getFinalOutput(r.messages);
-					const preview = output.slice(0, 200) + (output.length > 200 ? "..." : "");
-					return `[${r.agent}] ${r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`}: ${preview || "(no output)"}`;
+					return `[${r.agent}] ${r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`}: ${output || "(no output)"}`;
 				});
 				return {
 					content: [

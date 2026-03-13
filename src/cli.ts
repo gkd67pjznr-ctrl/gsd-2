@@ -1,18 +1,109 @@
 import {
   AuthStorage,
+  DefaultResourceLoader,
   ModelRegistry,
   SettingsManager,
   SessionManager,
   createAgentSession,
   InteractiveMode,
-} from '@mariozechner/pi-coding-agent'
+  runPrintMode,
+  runRpcMode,
+} from '@gsd/pi-coding-agent'
+import { existsSync, readdirSync, renameSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { agentDir, sessionsDir, authFilePath } from './app-paths.js'
-import { buildResourceLoader, initResources } from './resource-loader.js'
-import { loadStoredEnvKeys, runWizardIfNeeded } from './wizard.js'
+import { initResources, buildResourceLoader } from './resource-loader.js'
+import { ensureManagedTools } from './tool-bootstrap.js'
+import { loadStoredEnvKeys } from './wizard.js'
+import { getPiDefaultModelAndProvider, migratePiCredentials } from './pi-migration.js'
+import { shouldRunOnboarding, runOnboarding } from './onboarding.js'
+
+// ---------------------------------------------------------------------------
+// Minimal CLI arg parser — detects print/subagent mode flags
+// ---------------------------------------------------------------------------
+interface CliFlags {
+  mode?: 'text' | 'json' | 'rpc'
+  print?: boolean
+  continue?: boolean
+  noSession?: boolean
+  model?: string
+  extensions: string[]
+  appendSystemPrompt?: string
+  tools?: string[]
+  messages: string[]
+}
+
+function parseCliArgs(argv: string[]): CliFlags {
+  const flags: CliFlags = { extensions: [], messages: [] }
+  const args = argv.slice(2) // skip node + script
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--mode' && i + 1 < args.length) {
+      const m = args[++i]
+      if (m === 'text' || m === 'json' || m === 'rpc') flags.mode = m
+    } else if (arg === '--print' || arg === '-p') {
+      flags.print = true
+    } else if (arg === '--continue' || arg === '-c') {
+      flags.continue = true
+    } else if (arg === '--no-session') {
+      flags.noSession = true
+    } else if (arg === '--model' && i + 1 < args.length) {
+      flags.model = args[++i]
+    } else if (arg === '--extension' && i + 1 < args.length) {
+      flags.extensions.push(args[++i])
+    } else if (arg === '--append-system-prompt' && i + 1 < args.length) {
+      flags.appendSystemPrompt = args[++i]
+    } else if (arg === '--tools' && i + 1 < args.length) {
+      flags.tools = args[++i].split(',')
+    } else if (arg === '--version' || arg === '-v') {
+      process.stdout.write((process.env.GSD_VERSION || '0.0.0') + '\n')
+      process.exit(0)
+    } else if (arg === '--help' || arg === '-h') {
+      process.stdout.write(`GSD v${process.env.GSD_VERSION || '0.0.0'} — Get Shit Done\n\n`)
+      process.stdout.write('Usage: gsd [options] [message...]\n\n')
+      process.stdout.write('Options:\n')
+      process.stdout.write('  --mode <text|json|rpc>   Output mode (default: interactive)\n')
+      process.stdout.write('  --print, -p              Single-shot print mode\n')
+      process.stdout.write('  --continue, -c           Resume the most recent session\n')
+      process.stdout.write('  --model <id>             Override model (e.g. claude-opus-4-6)\n')
+      process.stdout.write('  --no-session             Disable session persistence\n')
+      process.stdout.write('  --extension <path>       Load additional extension\n')
+      process.stdout.write('  --tools <a,b,c>          Restrict available tools\n')
+      process.stdout.write('  --version, -v            Print version and exit\n')
+      process.stdout.write('  --help, -h               Print this help and exit\n')
+      process.stdout.write('\nSubcommands:\n')
+      process.stdout.write('  config                   Re-run the setup wizard\n')
+      process.exit(0)
+    } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
+      flags.messages.push(arg)
+    }
+  }
+  return flags
+}
+
+const cliFlags = parseCliArgs(process.argv)
+const isPrintMode = cliFlags.print || cliFlags.mode !== undefined
+
+// `gsd config` — replay the setup wizard and exit
+if (cliFlags.messages[0] === 'config') {
+  const authStorage = AuthStorage.create(authFilePath)
+  await runOnboarding(authStorage)
+  process.exit(0)
+}
+
+// Pi's tool bootstrap can mis-detect already-installed fd/rg on some systems
+// because spawnSync(..., ["--version"]) returns EPERM despite a zero exit code.
+// Provision local managed binaries first so Pi sees them without probing PATH.
+ensureManagedTools(join(agentDir, 'bin'))
 
 const authStorage = AuthStorage.create(authFilePath)
 loadStoredEnvKeys(authStorage)
-await runWizardIfNeeded(authStorage)
+migratePiCredentials(authStorage)
+
+// Run onboarding wizard on first launch (no LLM provider configured)
+if (!isPrintMode && shouldRunOnboarding(authStorage)) {
+  await runOnboarding(authStorage)
+}
 
 const modelRegistry = new ModelRegistry(authStorage)
 const settingsManager = SettingsManager.create(agentDir)
@@ -24,22 +115,30 @@ const settingsManager = SettingsManager.create(agentDir)
 const configuredProvider = settingsManager.getDefaultProvider()
 const configuredModel = settingsManager.getDefaultModel()
 const allModels = modelRegistry.getAll()
+const availableModels = modelRegistry.getAvailable()
 const configuredExists = configuredProvider && configuredModel &&
   allModels.some((m) => m.provider === configuredProvider && m.id === configuredModel)
+const configuredAvailable = configuredProvider && configuredModel &&
+  availableModels.some((m) => m.provider === configuredProvider && m.id === configuredModel)
 
-if (!configuredModel || !configuredExists) {
-  // Fallback: pick the best available Anthropic model
+if (!configuredModel || !configuredExists || !configuredAvailable) {
+  const piDefault = getPiDefaultModelAndProvider()
   const preferred =
-    allModels.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
-    allModels.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
-    allModels.find((m) => m.provider === 'anthropic')
+    (piDefault
+      ? availableModels.find((m) => m.provider === piDefault.provider && m.id === piDefault.model)
+      : undefined) ||
+    availableModels.find((m) => m.provider === 'openai' && m.id === 'gpt-5.4') ||
+    availableModels.find((m) => m.provider === 'openai') ||
+    availableModels.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
+    availableModels.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
+    availableModels.find((m) => m.provider === 'anthropic') ||
+    availableModels[0]
   if (preferred) {
     settingsManager.setDefaultModelAndProvider(preferred.provider, preferred.id)
   }
 }
 
-// Default thinking level: off (always reset if not explicitly set)
-if (settingsManager.getDefaultThinkingLevel() !== 'off' && !configuredExists) {
+if (settingsManager.getDefaultThinkingLevel() !== 'off' && (!configuredExists || !configuredAvailable)) {
   settingsManager.setDefaultThinkingLevel('off')
 }
 
@@ -53,7 +152,108 @@ if (!settingsManager.getCollapseChangelog()) {
   settingsManager.setCollapseChangelog(true)
 }
 
-const sessionManager = SessionManager.create(process.cwd(), sessionsDir)
+// ---------------------------------------------------------------------------
+// Print / subagent mode — single-shot execution, no TTY required
+// ---------------------------------------------------------------------------
+if (isPrintMode) {
+  const sessionManager = cliFlags.noSession
+    ? SessionManager.inMemory()
+    : SessionManager.create(process.cwd())
+
+  // Read --append-system-prompt file content (subagent writes agent system prompts to temp files)
+  let appendSystemPrompt: string | undefined
+  if (cliFlags.appendSystemPrompt) {
+    try {
+      appendSystemPrompt = readFileSync(cliFlags.appendSystemPrompt, 'utf-8')
+    } catch {
+      // If it's not a file path, treat it as literal text
+      appendSystemPrompt = cliFlags.appendSystemPrompt
+    }
+  }
+
+  initResources(agentDir)
+  const resourceLoader = new DefaultResourceLoader({
+    agentDir,
+    additionalExtensionPaths: cliFlags.extensions.length > 0 ? cliFlags.extensions : undefined,
+    appendSystemPrompt,
+  })
+  await resourceLoader.reload()
+
+  const { session, extensionsResult } = await createAgentSession({
+    authStorage,
+    modelRegistry,
+    settingsManager,
+    sessionManager,
+    resourceLoader,
+  })
+
+  if (extensionsResult.errors.length > 0) {
+    for (const err of extensionsResult.errors) {
+      process.stderr.write(`[gsd] Extension load error: ${err.error}\n`)
+    }
+  }
+
+  // Apply --model override if specified
+  if (cliFlags.model) {
+    const available = modelRegistry.getAvailable()
+    const match =
+      available.find((m) => m.id === cliFlags.model) ||
+      available.find((m) => `${m.provider}/${m.id}` === cliFlags.model)
+    if (match) {
+      session.setModel(match)
+    }
+  }
+
+  const mode = cliFlags.mode || 'text'
+
+  if (mode === 'rpc') {
+    await runRpcMode(session)
+    process.exit(0)
+  }
+
+  await runPrintMode(session, {
+    mode,
+    messages: cliFlags.messages,
+  })
+  process.exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// Interactive mode — normal TTY session
+// ---------------------------------------------------------------------------
+
+// Per-directory session storage — same encoding as the upstream SDK so that
+// /resume only shows sessions from the current working directory.
+const cwd = process.cwd()
+const safePath = `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
+const projectSessionsDir = join(sessionsDir, safePath)
+
+// Migrate legacy flat sessions: before per-directory scoping, all .jsonl session
+// files lived directly in ~/.gsd/sessions/. Move them into the correct per-cwd
+// subdirectory so /resume can find them.
+if (existsSync(sessionsDir)) {
+  try {
+    const entries = readdirSync(sessionsDir)
+    const flatJsonl = entries.filter(f => f.endsWith('.jsonl'))
+    if (flatJsonl.length > 0) {
+      const { mkdirSync } = await import('node:fs')
+      mkdirSync(projectSessionsDir, { recursive: true })
+      for (const file of flatJsonl) {
+        const src = join(sessionsDir, file)
+        const dst = join(projectSessionsDir, file)
+        if (!existsSync(dst)) {
+          renameSync(src, dst)
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — don't block startup if migration fails
+  }
+}
+
+const sessionManager = cliFlags.continue
+  ? SessionManager.continueRecent(cwd, projectSessionsDir)
+  : SessionManager.create(cwd, projectSessionsDir)
 
 initResources(agentDir)
 const resourceLoader = buildResourceLoader(agentDir)
@@ -114,6 +314,15 @@ if (enabledModelPatterns && enabledModelPatterns.length > 0) {
   if (scopedModels.length > 0 && scopedModels.length < availableModels.length) {
     session.setScopedModels(scopedModels)
   }
+}
+
+if (!process.stdin.isTTY) {
+  process.stderr.write('[gsd] Error: Interactive mode requires a terminal (TTY).\n')
+  process.stderr.write('[gsd] Non-interactive alternatives:\n')
+  process.stderr.write('[gsd]   gsd --print "your message"     Single-shot prompt\n')
+  process.stderr.write('[gsd]   gsd --mode rpc                 JSON-RPC over stdin/stdout\n')
+  process.stderr.write('[gsd]   gsd --mode text "message"      Text output mode\n')
+  process.exit(1)
 }
 
 const interactiveMode = new InteractiveMode(session)
