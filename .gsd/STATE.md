@@ -1,7 +1,10 @@
 # GSD State
 
-**Active Milestone:** none
-**Phase:** idle
+**Active Milestone:** M003 — Conversational Modes & Lightweight Execution
+**Phase:** context gathered, ready for planning
+
+## Current Milestone
+- M003: Context written, needs research → roadmap → slices
 
 ## Completed Milestones
 - M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
@@ -13,4 +16,4 @@
 - Total: 664
 
 ## Next Action
-Ready for M003 planning.
+Run `/gsd auto` to begin M003 planning and research.
