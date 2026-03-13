@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "@gsd/pi-coding-agent";
+import type { GitPreferences } from "./git-service.ts";
+import { VALID_BRANCH_NAME } from "./git-service.ts";
 
 const GLOBAL_PREFERENCES_PATH = join(homedir(), ".gsd", "preferences.md");
 const LEGACY_GLOBAL_PREFERENCES_PATH = join(homedir(), ".pi", "agent", "gsd-preferences.md");
@@ -15,11 +17,43 @@ export interface GSDSkillRule {
   avoid?: string[];
 }
 
+/**
+ * Model configuration for a single phase.
+ * Supports primary model with optional fallbacks for resilience.
+ */
+export interface GSDPhaseModelConfig {
+  /** Primary model ID (e.g., "claude-opus-4-6") */
+  model: string;
+  /** Fallback models to try in order if primary fails (e.g., rate limits, credits exhausted) */
+  fallbacks?: string[];
+}
+
+/**
+ * Legacy model config — simple string per phase.
+ * Kept for backward compatibility; will be migrated to GSDModelConfigV2 on load.
+ */
 export interface GSDModelConfig {
-  research?: string;   // e.g. "claude-sonnet-4-6"
-  planning?: string;   // e.g. "claude-opus-4-6"
-  execution?: string;  // e.g. "claude-sonnet-4-6"
-  completion?: string; // e.g. "claude-sonnet-4-6"
+  research?: string;
+  planning?: string;
+  execution?: string;
+  completion?: string;
+}
+
+/**
+ * Extended model config with per-phase fallback support.
+ * Each phase can specify a primary model and ordered fallbacks.
+ */
+export interface GSDModelConfigV2 {
+  research?: string | GSDPhaseModelConfig;
+  planning?: string | GSDPhaseModelConfig;
+  execution?: string | GSDPhaseModelConfig;
+  completion?: string | GSDPhaseModelConfig;
+}
+
+/** Normalized model selection with resolved fallbacks */
+export interface ResolvedModelConfig {
+  primary: string;
+  fallbacks: string[];
 }
 
 export type SkillDiscoveryMode = "auto" | "suggest" | "off";
@@ -32,6 +66,13 @@ export interface AutoSupervisorConfig {
 }
 
 export type QualityLevelPref = "fast" | "standard" | "strict";
+
+export interface RemoteQuestionsConfig {
+  channel: "slack" | "discord";
+  channel_id: string | number;
+  timeout_minutes?: number;        // clamped to 1-30
+  poll_interval_seconds?: number;  // clamped to 2-30
+}
 
 export interface GSDPreferences {
   version?: number;
@@ -47,6 +88,8 @@ export interface GSDPreferences {
   budget_ceiling?: number;
   correction_capture?: boolean;
   quality_level?: QualityLevelPref;
+  remote_questions?: RemoteQuestionsConfig;
+  git?: GitPreferences;
 }
 
 export interface LoadedGSDPreferences {
@@ -434,7 +477,12 @@ function parseFrontmatterBlock(frontmatter: string): GSDPreferences {
 function parseScalar(value: string): string | number | boolean {
   if (value === "true") return true;
   if (value === "false") return false;
-  if (/^-?\d+$/.test(value)) return Number(value);
+  if (/^-?\d+$/.test(value)) {
+    const n = Number(value);
+    // Keep large integers (e.g. Discord channel IDs) as strings to avoid precision loss
+    if (Number.isSafeInteger(n)) return n;
+    return value;
+  }
   return value.replace(/^['\"]|['\"]$/g, "");
 }
 
@@ -452,26 +500,56 @@ export function resolveSkillDiscoveryMode(): SkillDiscoveryMode {
  * Returns undefined if no model preference is set for this unit type.
  */
 export function resolveModelForUnit(unitType: string): string | undefined {
+  const resolved = resolveModelWithFallbacksForUnit(unitType);
+  return resolved?.primary;
+}
+
+/**
+ * Resolve model and fallbacks for a given auto-mode unit type.
+ * Returns the primary model and ordered fallbacks, or undefined if not configured.
+ *
+ * Supports both legacy string format and extended object format:
+ * - Legacy: `planning: claude-opus-4-6`
+ * - Extended: `planning: { model: claude-opus-4-6, fallbacks: [glm-5, minimax-m2.5] }`
+ */
+export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedModelConfig | undefined {
   const prefs = loadEffectiveGSDPreferences();
   if (!prefs?.preferences.models) return undefined;
-  const m = prefs.preferences.models;
+  const m = prefs.preferences.models as GSDModelConfigV2;
 
+  let phaseConfig: string | GSDPhaseModelConfig | undefined;
   switch (unitType) {
     case "research-milestone":
     case "research-slice":
-      return m.research;
+      phaseConfig = m.research;
+      break;
     case "plan-milestone":
     case "plan-slice":
     case "replan-slice":
-      return m.planning;
+      phaseConfig = m.planning;
+      break;
     case "execute-task":
-      return m.execution;
+      phaseConfig = m.execution;
+      break;
     case "complete-slice":
     case "run-uat":
-      return m.completion;
+      phaseConfig = m.completion;
+      break;
     default:
       return undefined;
   }
+
+  if (!phaseConfig) return undefined;
+
+  // Normalize: string -> { model, fallbacks: [] }
+  if (typeof phaseConfig === "string") {
+    return { primary: phaseConfig, fallbacks: [] };
+  }
+
+  return {
+    primary: phaseConfig.model,
+    fallbacks: phaseConfig.fallbacks ?? [],
+  };
 }
 
 export function resolveAutoSupervisorConfig(): AutoSupervisorConfig {
@@ -501,6 +579,12 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     budget_ceiling: override.budget_ceiling ?? base.budget_ceiling,
     correction_capture: override.correction_capture ?? base.correction_capture,
     quality_level: override.quality_level ?? base.quality_level,
+    remote_questions: override.remote_questions
+      ? { ...(base.remote_questions ?? {}), ...override.remote_questions }
+      : base.remote_questions,
+    git: (base.git || override.git)
+      ? { ...(base.git ?? {}), ...(override.git ?? {}) }
+      : undefined,
   };
 }
 
@@ -590,6 +674,59 @@ function validatePreferences(preferences: GSDPreferences): {
       validated.budget_ceiling = Number(raw);
     } else {
       errors.push("budget_ceiling must be a finite number");
+    }
+  }
+
+  // ─── Git Preferences ───────────────────────────────────────────────────
+  if (preferences.git && typeof preferences.git === "object") {
+    const git: Record<string, unknown> = {};
+    const g = preferences.git as Record<string, unknown>;
+
+    if (g.auto_push !== undefined) {
+      if (typeof g.auto_push === "boolean") git.auto_push = g.auto_push;
+      else errors.push("git.auto_push must be a boolean");
+    }
+    if (g.push_branches !== undefined) {
+      if (typeof g.push_branches === "boolean") git.push_branches = g.push_branches;
+      else errors.push("git.push_branches must be a boolean");
+    }
+    if (g.remote !== undefined) {
+      if (typeof g.remote === "string" && g.remote.trim() !== "") git.remote = g.remote.trim();
+      else errors.push("git.remote must be a non-empty string");
+    }
+    if (g.snapshots !== undefined) {
+      if (typeof g.snapshots === "boolean") git.snapshots = g.snapshots;
+      else errors.push("git.snapshots must be a boolean");
+    }
+    if (g.pre_merge_check !== undefined) {
+      if (typeof g.pre_merge_check === "boolean") {
+        git.pre_merge_check = g.pre_merge_check;
+      } else if (typeof g.pre_merge_check === "string" && g.pre_merge_check.trim() !== "") {
+        git.pre_merge_check = g.pre_merge_check.trim();
+      } else {
+        errors.push("git.pre_merge_check must be a boolean or a non-empty string command");
+      }
+    }
+    if (g.commit_type !== undefined) {
+      const validCommitTypes = new Set([
+        "feat", "fix", "refactor", "docs", "test", "chore", "perf", "ci", "build", "style",
+      ]);
+      if (typeof g.commit_type === "string" && validCommitTypes.has(g.commit_type)) {
+        git.commit_type = g.commit_type;
+      } else {
+        errors.push(`git.commit_type must be one of: feat, fix, refactor, docs, test, chore, perf, ci, build, style`);
+      }
+    }
+    if (g.main_branch !== undefined) {
+      if (typeof g.main_branch === "string" && g.main_branch.trim() !== "" && VALID_BRANCH_NAME.test(g.main_branch)) {
+        git.main_branch = g.main_branch;
+      } else {
+        errors.push("git.main_branch must be a valid branch name (alphanumeric, _, -, /, .)");
+      }
+    }
+
+    if (Object.keys(git).length > 0) {
+      validated.git = git as GitPreferences;
     }
   }
 

@@ -6,7 +6,7 @@
  * No execution state, no hooks, no tools — the LLM does the rest.
  */
 
-import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { showNextAction } from "../shared/next-action-ui.js";
 import { loadFile, parseRoadmap } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
@@ -20,8 +20,9 @@ import {
 } from "./paths.js";
 import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { ensureGitignore, ensurePreferences } from "./gitignore.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 // ─── Auto-start after discuss ─────────────────────────────────────────────────
 
@@ -31,13 +32,14 @@ let pendingAutoStart: {
   pi: ExtensionAPI;
   basePath: string;
   milestoneId: string; // the milestone being discussed
+  step?: boolean; // preserve step mode through discuss → auto transition
 } | null = null;
 
 /** Called from agent_end to check if auto-mode should start after discuss */
 export function checkAutoStartAfterDiscuss(): boolean {
   if (!pendingAutoStart) return false;
 
-  const { ctx, pi, basePath, milestoneId } = pendingAutoStart;
+  const { ctx, pi, basePath, milestoneId, step } = pendingAutoStart;
 
   // Don't fire until the discuss phase has actually produced a context file
   // for the milestone being discussed. agent_end fires after every LLM turn,
@@ -47,7 +49,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
   if (!contextFile) return false; // no context yet — keep waiting
 
   pendingAutoStart = null;
-  startAuto(ctx, pi, basePath, false).catch(() => {});
+  startAuto(ctx, pi, basePath, false, { step }).catch(() => {});
   return true;
 }
 
@@ -435,13 +437,16 @@ export async function showSmartEntry(
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
   basePath: string,
+  options?: { step?: boolean },
 ): Promise<void> {
+  const stepMode = options?.step;
 
   // ── Ensure git repo exists — GSD needs it for branch-per-slice ──────
   try {
     execSync("git rev-parse --git-dir", { cwd: basePath, stdio: "pipe" });
   } catch {
-    execSync("git init", { cwd: basePath, stdio: "pipe" });
+    const mainBranch = loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
+    execFileSync("git", ["init", "-b", mainBranch], { cwd: basePath, stdio: "pipe" });
   }
 
   // ── Ensure .gitignore has baseline patterns ──────────────────────────
@@ -501,7 +506,7 @@ export async function showSmartEntry(
 
     if (isFirst) {
       // First ever — skip wizard, just ask directly
-      pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId };
+      pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId, step: stepMode };
       dispatchWorkflow(pi, buildDiscussPrompt(nextId,
         `New project, milestone ${nextId}. Do NOT read or explore .gsd/ — it's empty scaffolding.`,
         basePath
@@ -522,7 +527,7 @@ export async function showSmartEntry(
       });
 
       if (choice === "new_milestone") {
-        pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId };
+        pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId, step: stepMode };
         dispatchWorkflow(pi, buildDiscussPrompt(nextId,
           `New milestone ${nextId}.`,
           basePath
@@ -560,7 +565,7 @@ export async function showSmartEntry(
       const milestoneIds = findMilestoneIds(basePath);
       const nextId = `M${String(milestoneIds.length + 1).padStart(3, "0")}`;
 
-      pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId };
+      pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId, step: stepMode };
       dispatchWorkflow(pi, buildDiscussPrompt(nextId,
         `New milestone ${nextId}.`,
         basePath
@@ -606,8 +611,9 @@ export async function showSmartEntry(
       });
 
       if (choice === "plan") {
+        const secretsOutputPath = relMilestoneFile(basePath, milestoneId, "SECRETS");
         dispatchWorkflow(pi, loadPrompt("guided-plan-milestone", {
-          milestoneId, milestoneTitle,
+          milestoneId, milestoneTitle, secretsOutputPath,
         }));
       } else if (choice === "discuss") {
         dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {

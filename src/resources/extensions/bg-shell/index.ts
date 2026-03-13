@@ -23,30 +23,60 @@
  *   /bg — interactive process manager overlay
  */
 
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@gsd/pi-ai";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 	Theme,
-} from "@mariozechner/pi-coding-agent";
+} from "@gsd/pi-coding-agent";
 import {
 	truncateHead,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
-} from "@mariozechner/pi-coding-agent";
+	getShellConfig,
+} from "@gsd/pi-coding-agent";
 import {
 	Text,
 	truncateToWidth,
 	visibleWidth,
 	matchesKey,
 	Key,
-} from "@mariozechner/pi-tui";
+} from "@gsd/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
 import { randomUUID } from "node:crypto";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { shortcutDesc } from "../shared/terminal.js";
+import { createRequire } from "node:module";
+
+// ── Windows VT Input Restoration ────────────────────────────────────────────
+// Child processes (esp. Git Bash / MSYS2) can strip the ENABLE_VIRTUAL_TERMINAL_INPUT
+// flag from the shared stdin console handle. Re-enable it after each child exits.
+
+let _vtHandles: { GetConsoleMode: Function; SetConsoleMode: Function; handle: unknown } | null = null;
+function restoreWindowsVTInput(): void {
+	if (process.platform !== "win32") return;
+	try {
+		if (!_vtHandles) {
+			const cjsRequire = createRequire(import.meta.url);
+			const koffi = cjsRequire("koffi");
+			const k32 = koffi.load("kernel32.dll");
+			const GetStdHandle = k32.func("void* __stdcall GetStdHandle(int)");
+			const GetConsoleMode = k32.func("bool __stdcall GetConsoleMode(void*, _Out_ uint32_t*)");
+			const SetConsoleMode = k32.func("bool __stdcall SetConsoleMode(void*, uint32_t)");
+			const handle = GetStdHandle(-10);
+			_vtHandles = { GetConsoleMode, SetConsoleMode, handle };
+		}
+		const ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200;
+		const mode = new Uint32Array(1);
+		_vtHandles.GetConsoleMode(_vtHandles.handle, mode);
+		if (!(mode[0] & ENABLE_VIRTUAL_TERMINAL_INPUT)) {
+			_vtHandles.SetConsoleMode(_vtHandles.handle, mode[0] | ENABLE_VIRTUAL_TERMINAL_INPUT);
+		}
+	} catch { /* koffi not available on non-Windows */ }
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -551,11 +581,12 @@ function startProcess(opts: StartOptions): BgProcess {
 
 	const env = { ...process.env, ...(opts.env || {}) };
 
-	const proc = spawn("bash", ["-c", opts.command], {
+	const { shell, args: shellArgs } = getShellConfig();
+	const proc = spawn(shell, [...shellArgs, opts.command], {
 		cwd: opts.cwd,
 		stdio: ["pipe", "pipe", "pipe"],
 		env,
-		detached: true,
+		detached: process.platform !== "win32",
 	});
 
 	const bg: BgProcess = {
@@ -621,6 +652,7 @@ function startProcess(opts: StartOptions): BgProcess {
 	});
 
 	proc.on("exit", (code, sig) => {
+		restoreWindowsVTInput();
 		bg.alive = false;
 		bg.exitCode = code;
 		bg.signal = sig ?? null;
@@ -686,14 +718,32 @@ function killProcess(id: string, sig: NodeJS.Signals = "SIGTERM"): boolean {
 	if (!bg) return false;
 	if (!bg.alive) return true;
 	try {
-		if (bg.proc.pid) {
-			try {
-				process.kill(-bg.proc.pid, sig);
-			} catch {
+		if (process.platform === "win32") {
+			// Windows: use taskkill /F /T to force-kill the entire process tree.
+			// process.kill(-pid) (Unix process groups) does not work on Windows.
+			if (bg.proc.pid) {
+				const result = spawnSync("taskkill", ["/F", "/T", "/PID", String(bg.proc.pid)], {
+					timeout: 5000,
+					encoding: "utf-8",
+				});
+				if (result.status !== 0 && result.status !== 128) {
+					// taskkill failed — try the direct kill as fallback
+					bg.proc.kill(sig);
+				}
+			} else {
 				bg.proc.kill(sig);
 			}
 		} else {
-			bg.proc.kill(sig);
+			// Unix/macOS: kill the process group via negative PID
+			if (bg.proc.pid) {
+				try {
+					process.kill(-bg.proc.pid, sig);
+				} catch {
+					bg.proc.kill(sig);
+				}
+			} else {
+				bg.proc.kill(sig);
+			}
 		}
 		return true;
 	} catch {
@@ -2307,7 +2357,7 @@ export default function (pi: ExtensionAPI) {
 	// ── Ctrl+Alt+B shortcut ──────────────────────────────────────────────
 
 	pi.registerShortcut(Key.ctrlAlt("b"), {
-		description: "Open background process manager",
+		description: shortcutDesc("Open background process manager", "/bg"),
 		handler: async (ctx) => {
 			latestCtx = ctx;
 			await ctx.ui.custom<void>(

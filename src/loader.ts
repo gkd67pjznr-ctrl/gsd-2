@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url'
 import { dirname, resolve, join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { agentDir, appRoot } from './app-paths.js'
+import { renderLogo } from './logo.js'
 
 // pkg/ is a shim directory: contains gsd's piConfig (package.json) and pi's
 // theme assets (dist/modes/interactive/theme/) without a src/ directory.
@@ -23,21 +24,15 @@ if (!existsSync(appRoot)) {
   const green = '\x1b[32m'
   const dim   = '\x1b[2m'
   const reset = '\x1b[0m'
+  const colorCyan = (s: string) => `${cyan}${s}${reset}`
   let version = ''
   try {
     const pkgJson = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'))
     version = pkgJson.version ?? ''
   } catch { /* ignore */ }
   process.stderr.write(
+    renderLogo(colorCyan) +
     '\n' +
-    cyan +
-    '   ██████╗ ███████╗██████╗ \n' +
-    '  ██╔════╝ ██╔════╝██╔══██╗\n' +
-    '  ██║  ███╗███████╗██║  ██║\n' +
-    '  ██║   ██║╚════██║██║  ██║\n' +
-    '  ╚██████╔╝███████║██████╔╝\n' +
-    '   ╚═════╝ ╚══════╝╚═════╝ ' +
-    reset + '\n\n' +
     `  Get Shit Done ${dim}v${version}${reset}\n` +
     `  ${green}Welcome.${reset} Setting up your environment...\n\n`
   )

@@ -152,9 +152,60 @@ test("initResources syncs extensions, agents, and AGENTS.md to target dir", asyn
 // 4. wizard loadStoredEnvKeys hydration
 // ═══════════════════════════════════════════════════════════════════════════
 
+test("buildResourceLoader expands ~/.pi extension directories into entry files", async () => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-pi-ext-test-"));
+  const fakeHome = join(tmp, "home");
+  const fakeAgentDir = join(tmp, "agent");
+  const piExtensionsDir = join(fakeHome, ".pi", "agent", "extensions");
+  mkdirSync(piExtensionsDir, { recursive: true });
+  mkdirSync(fakeAgentDir, { recursive: true });
+
+  writeFileSync(
+    join(piExtensionsDir, "top-level.ts"),
+    "export default function(pi){ pi.on('agent_start', () => {}); }\n",
+  );
+
+  const packagedDir = join(piExtensionsDir, "packaged-ext");
+  mkdirSync(packagedDir, { recursive: true });
+  writeFileSync(
+    join(packagedDir, "package.json"),
+    JSON.stringify({ pi: { extensions: ["./custom-entry.ts"] } }, null, 2),
+  );
+  writeFileSync(
+    join(packagedDir, "custom-entry.ts"),
+    "export default function(pi){ pi.on('agent_start', () => {}); }\n",
+  );
+
+  process.env.HOME = fakeHome;
+
+  try {
+    const { buildResourceLoader } = await import("../resource-loader.ts");
+    const loader = buildResourceLoader(fakeAgentDir);
+    await loader.reload();
+    const { extensions, errors } = loader.getExtensions();
+
+    assert.ok(
+      extensions.some((ext) => ext.path.endsWith("top-level.ts")),
+      "loads top-level ~/.pi extension files",
+    );
+    assert.ok(
+      extensions.some((ext) => ext.path.endsWith("packaged-ext/custom-entry.ts")),
+      "loads packaged ~/.pi extensions via pi.extensions manifest",
+    );
+    assert.ok(
+      !errors.some((err) => err.path === piExtensionsDir),
+      "does not try to load the ~/.pi/agent/extensions directory itself as a module",
+    );
+  } finally {
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("loadStoredEnvKeys hydrates process.env from auth.json", async () => {
   const { loadStoredEnvKeys } = await import("../wizard.ts");
-  const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+  const { AuthStorage } = await import("@gsd/pi-coding-agent");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-wizard-test-"));
   const authPath = join(tmp, "auth.json");
@@ -162,6 +213,7 @@ test("loadStoredEnvKeys hydrates process.env from auth.json", async () => {
     brave: { type: "api_key", key: "test-brave-key" },
     brave_answers: { type: "api_key", key: "test-answers-key" },
     context7: { type: "api_key", key: "test-ctx7-key" },
+    tavily: { type: "api_key", key: "test-tavily-key" },
   }));
 
   // Clear any existing env vars
@@ -169,10 +221,12 @@ test("loadStoredEnvKeys hydrates process.env from auth.json", async () => {
   const origBraveAnswers = process.env.BRAVE_ANSWERS_KEY;
   const origCtx7 = process.env.CONTEXT7_API_KEY;
   const origJina = process.env.JINA_API_KEY;
+  const origTavily = process.env.TAVILY_API_KEY;
   delete process.env.BRAVE_API_KEY;
   delete process.env.BRAVE_ANSWERS_KEY;
   delete process.env.CONTEXT7_API_KEY;
   delete process.env.JINA_API_KEY;
+  delete process.env.TAVILY_API_KEY;
 
   try {
     const auth = AuthStorage.create(authPath);
@@ -182,12 +236,14 @@ test("loadStoredEnvKeys hydrates process.env from auth.json", async () => {
     assert.equal(process.env.BRAVE_ANSWERS_KEY, "test-answers-key", "BRAVE_ANSWERS_KEY hydrated");
     assert.equal(process.env.CONTEXT7_API_KEY, "test-ctx7-key", "CONTEXT7_API_KEY hydrated");
     assert.equal(process.env.JINA_API_KEY, undefined, "JINA_API_KEY not set (not in auth)");
+    assert.equal(process.env.TAVILY_API_KEY, "test-tavily-key", "TAVILY_API_KEY hydrated");
   } finally {
     // Restore original env
     if (origBrave) process.env.BRAVE_API_KEY = origBrave; else delete process.env.BRAVE_API_KEY;
     if (origBraveAnswers) process.env.BRAVE_ANSWERS_KEY = origBraveAnswers; else delete process.env.BRAVE_ANSWERS_KEY;
     if (origCtx7) process.env.CONTEXT7_API_KEY = origCtx7; else delete process.env.CONTEXT7_API_KEY;
     if (origJina) process.env.JINA_API_KEY = origJina; else delete process.env.JINA_API_KEY;
+    if (origTavily) process.env.TAVILY_API_KEY = origTavily; else delete process.env.TAVILY_API_KEY;
     rmSync(tmp, { recursive: true, force: true });
   }
 });
@@ -198,7 +254,7 @@ test("loadStoredEnvKeys hydrates process.env from auth.json", async () => {
 
 test("loadStoredEnvKeys does not overwrite existing env vars", async () => {
   const { loadStoredEnvKeys } = await import("../wizard.ts");
-  const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+  const { AuthStorage } = await import("@gsd/pi-coding-agent");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-wizard-nooverwrite-"));
   const authPath = join(tmp, "auth.json");
@@ -328,6 +384,7 @@ test("gsd launches and loads extensions without errors", async () => {
         BRAVE_ANSWERS_KEY: "test",
         CONTEXT7_API_KEY: "test",
         JINA_API_KEY: "test",
+        TAVILY_API_KEY: "test",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

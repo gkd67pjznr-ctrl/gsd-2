@@ -147,6 +147,13 @@ async function updateStateFile(basePath: string, fixesApplied: string[]): Promis
   fixesApplied.push(`updated ${path}`);
 }
 
+/** Rebuild STATE.md from current disk state. Exported for auto-mode post-hooks. */
+export async function rebuildState(basePath: string): Promise<void> {
+  const state = await deriveState(basePath);
+  const path = resolveGsdRootFile(basePath, "STATE");
+  await saveFile(path, buildStateMarkdown(state));
+}
+
 async function ensureSliceSummaryStub(basePath: string, milestoneId: string, sliceId: string, fixesApplied: string[]): Promise<void> {
   const path = join(resolveSlicePath(basePath, milestoneId, sliceId) ?? relSlicePath(basePath, milestoneId, sliceId), `${sliceId}-SUMMARY.md`);
   const absolute = resolveSliceFile(basePath, milestoneId, sliceId, "SUMMARY") ?? join(resolveSlicePath(basePath, milestoneId, sliceId)!, `${sliceId}-SUMMARY.md`);
@@ -415,10 +422,29 @@ export function formatDoctorIssuesForPrompt(issues: DoctorIssue[]): string {
   }).join("\n");
 }
 
-export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; scope?: string }): Promise<DoctorReport> {
+export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; scope?: string; fixLevel?: "task" | "all" }): Promise<DoctorReport> {
   const issues: DoctorIssue[] = [];
   const fixesApplied: string[] = [];
   const fix = options?.fix === true;
+  const fixLevel = options?.fixLevel ?? "all";
+
+  // Issue codes that represent completion state transitions — creating summary
+  // stubs, marking slices/milestones done in the roadmap. These belong to the
+  // dispatch lifecycle (complete-slice, complete-milestone units), not to
+  // mechanical post-hook bookkeeping. When fixLevel is "task", these are
+  // detected and reported but never auto-fixed.
+  const completionTransitionCodes = new Set<DoctorIssueCode>([
+    "all_tasks_done_missing_slice_summary",
+    "all_tasks_done_missing_slice_uat",
+    "all_tasks_done_roadmap_not_checked",
+  ]);
+
+  /** Whether a given issue code should be auto-fixed at the current fixLevel. */
+  const shouldFix = (code: DoctorIssueCode): boolean => {
+    if (!fix) return false;
+    if (fixLevel === "task" && completionTransitionCodes.has(code)) return false;
+    return true;
+  };
 
   const prefs = loadEffectiveGSDPreferences();
   if (prefs) {
@@ -599,7 +625,7 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
           file: relSliceFile(basePath, milestoneId, slice.id, "SUMMARY"),
           fixable: true,
         });
-        if (fix) await ensureSliceSummaryStub(basePath, milestoneId, slice.id, fixesApplied);
+        if (shouldFix("all_tasks_done_missing_slice_summary")) await ensureSliceSummaryStub(basePath, milestoneId, slice.id, fixesApplied);
       }
 
       if (allTasksDone && !hasSliceUat) {
@@ -612,7 +638,7 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
           file: `${relSlicePath(basePath, milestoneId, slice.id)}/${slice.id}-UAT.md`,
           fixable: true,
         });
-        if (fix) await ensureSliceUatStub(basePath, milestoneId, slice.id, fixesApplied);
+        if (shouldFix("all_tasks_done_missing_slice_uat")) await ensureSliceUatStub(basePath, milestoneId, slice.id, fixesApplied);
       }
 
       if (allTasksDone && !slice.done) {
@@ -625,7 +651,7 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
           file: relMilestoneFile(basePath, milestoneId, "ROADMAP"),
           fixable: true,
         });
-        if (fix && (hasSliceSummary || issues.some(issue => issue.code === "all_tasks_done_missing_slice_summary" && issue.unitId === unitId))) {
+        if (shouldFix("all_tasks_done_roadmap_not_checked") && (hasSliceSummary || issues.some(issue => issue.code === "all_tasks_done_missing_slice_summary" && issue.unitId === unitId))) {
           await markSliceDoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
         }
       }

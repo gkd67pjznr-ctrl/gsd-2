@@ -8,7 +8,7 @@
  *  - Every action returns feedback (accessibility snapshot, screenshots on navigate)
  *  - Errors include visual debugging (screenshots on failure, surfaced JS errors)
  *  - Smart waits (domcontentloaded + best-effort settle, not blocking networkidle)
- *  - 2x DPI screenshots for readable text
+ *  - Screenshots capped at 1568px max dimension (Anthropic API limit safety)
  *  - JPEG for viewport screenshots (smaller), PNG for element crops (transparency)
  *  - Auto-handles JS dialogs (alert/confirm/prompt) to prevent page freezes
  *  - Auto-switches to new tabs (popups, target="_blank")
@@ -20,14 +20,14 @@
  *  - Cleaned up on session_shutdown
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	truncateHead,
-} from "@mariozechner/pi-coding-agent";
+} from "@gsd/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@gsd/pi-ai";
 import type { Browser, BrowserContext, Frame, Page } from "playwright";
 import { mkdir, stat, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
@@ -731,11 +731,75 @@ async function postActionSummary(p: Page, target?: Page | Frame): Promise<string
 	}
 }
 
+// Anthropic API rejects images > 2000px in multi-image requests.
+// Cap at 1568px (recommended optimal size) to stay well within limits.
+const MAX_SCREENSHOT_DIM = 1568;
+
+/**
+ * If either dimension of the image buffer exceeds MAX_SCREENSHOT_DIM,
+ * downscale proportionally using the browser's canvas (zero dependencies).
+ * Returns the original buffer unchanged if already within limits.
+ */
+async function constrainScreenshot(
+	page: Page,
+	buffer: Buffer,
+	mimeType: string,
+	quality: number,
+): Promise<Buffer> {
+	let width: number;
+	let height: number;
+
+	if (mimeType === "image/png") {
+		width = buffer.readUInt32BE(16);
+		height = buffer.readUInt32BE(20);
+	} else {
+		width = 0;
+		height = 0;
+		for (let i = 0; i < buffer.length - 8; i++) {
+			if (buffer[i] === 0xff && (buffer[i + 1] === 0xc0 || buffer[i + 1] === 0xc2)) {
+				height = buffer.readUInt16BE(i + 5);
+				width = buffer.readUInt16BE(i + 7);
+				break;
+			}
+		}
+	}
+
+	if (width <= MAX_SCREENSHOT_DIM && height <= MAX_SCREENSHOT_DIM) {
+		return buffer;
+	}
+
+	const b64 = buffer.toString("base64");
+	const result = await page.evaluate(
+		async ({ b64, mime, maxDim, q }) => {
+			const img = new Image();
+			await new Promise<void>((resolve, reject) => {
+				img.onload = () => resolve();
+				img.onerror = reject;
+				img.src = `data:${mime};base64,${b64}`;
+			});
+			const scale = Math.min(maxDim / img.width, maxDim / img.height);
+			const w = Math.round(img.width * scale);
+			const h = Math.round(img.height * scale);
+			const canvas = document.createElement("canvas");
+			canvas.width = w;
+			canvas.height = h;
+			const ctx = canvas.getContext("2d")!;
+			ctx.drawImage(img, 0, 0, w, h);
+			return canvas.toDataURL(mime, q / 100);
+		},
+		{ b64, mime: mimeType, maxDim: MAX_SCREENSHOT_DIM, q: quality },
+	);
+
+	const resizedB64 = result.split(",")[1];
+	return Buffer.from(resizedB64, "base64");
+}
+
 /** Capture a JPEG screenshot for error debugging. Returns base64 or null. */
 async function captureErrorScreenshot(p: Page | null): Promise<{ data: string; mimeType: string } | null> {
     if (!p) return null;
     try {
-        const buf = await p.screenshot({ type: "jpeg", quality: 60 });
+        let buf = await p.screenshot({ type: "jpeg", quality: 60, scale: "css" });
+        buf = await constrainScreenshot(p, buf, "image/jpeg", 60);
         return { data: buf.toString("base64"), mimeType: "image/jpeg" };
     } catch {
         return null;
@@ -1602,7 +1666,8 @@ export default function (pi: ExtensionAPI) {
 
 				let screenshotContent: any[] = [];
 				try {
-					const buf = await p.screenshot({ type: "jpeg", quality: 80 });
+					let buf = await p.screenshot({ type: "jpeg", quality: 80, scale: "css" });
+					buf = await constrainScreenshot(p, buf, "image/jpeg", 80);
 					screenshotContent = [{ type: "image", data: buf.toString("base64"), mimeType: "image/jpeg" }];
 				} catch {}
 
@@ -1744,7 +1809,8 @@ export default function (pi: ExtensionAPI) {
 				// Include screenshot like navigate does
 				let screenshotContent: any[] = [];
 				try {
-					const buf = await p.screenshot({ type: "jpeg", quality: 80 });
+					let buf = await p.screenshot({ type: "jpeg", quality: 80, scale: "css" });
+					buf = await constrainScreenshot(p, buf, "image/jpeg", 80);
 					screenshotContent = [{
 						type: "image",
 						data: buf.toString("base64"),
@@ -1805,22 +1871,26 @@ export default function (pi: ExtensionAPI) {
 
 				let screenshotBuffer: Buffer;
 				let mimeType: string;
+				const quality = params.quality ?? 80;
 
 				if (params.selector) {
 					// Element screenshots: keep PNG (may have transparency)
 					const locator = p.locator(params.selector).first();
-					screenshotBuffer = await locator.screenshot({ type: "png" });
+					screenshotBuffer = await locator.screenshot({ type: "png", scale: "css" });
 					mimeType = "image/png";
 				} else {
 					// Viewport/fullpage: use JPEG (3-5x smaller, fine for AI analysis)
-					const quality = params.quality ?? 80;
 					screenshotBuffer = await p.screenshot({
 						fullPage: params.fullPage ?? false,
 						type: "jpeg",
 						quality,
+						scale: "css",
 					});
 					mimeType = "image/jpeg";
 				}
+
+				// Downscale if dimensions exceed API limit (1568px max)
+				screenshotBuffer = await constrainScreenshot(p, screenshotBuffer, mimeType, quality);
 
 				const base64Data = screenshotBuffer.toString("base64");
 				const title = await p.title();
