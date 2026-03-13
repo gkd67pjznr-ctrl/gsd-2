@@ -49,7 +49,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Embedding Abstraction & Vector Index** `risk:high` `depends:[]`
+- [x] **S01: Embedding Abstraction & Vector Index** `risk:high` `depends:[]`
   > After this: `embedText()` produces vectors via OpenAI or Ollama, `VectorIndex` wraps Vectra to store/query correction embeddings in `.gsd/patterns/vectors/`, and test assertions prove similarity search returns semantically relevant results ranked by cosine distance in <50ms
 - [ ] **S02: Semantic Recall in Dispatch** `risk:medium` `depends:[S01]`
   > After this: `buildRecallBlock()` uses vector similarity when embeddings exist, falls back to category matching when they don't, embedding is triggered asynchronously from `writeCorrection()` in auto.ts, and dispatch prompts contain semantically relevant past corrections — proven by tests and a real auto-mode dispatch

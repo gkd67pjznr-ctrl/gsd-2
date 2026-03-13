@@ -1,22 +1,27 @@
 # GSD State
 
 **Active Milestone:** M002 — Knowledge Infrastructure — Semantic Recall via Vectra
-**Phase:** planned
+**Phase:** executing
 
 ## Current Milestone
 - M002: 3 slices planned, 0 complete
-- S01: Embedding Abstraction & Vector Index (risk:high) — pending
+- **S01: Embedding Abstraction & Vector Index (risk:high) — complete, 3/3 tasks done**
 - S02: Semantic Recall in Dispatch (risk:medium) — pending
 - S03: Cost Tracking & Index Lifecycle (risk:low) — pending
+
+## Current Slice
+- S01: complete ✅ (3/3 tasks, 37 new test assertions)
+- Next: S02 — Semantic Recall in Dispatch
 
 ## Completed Milestones
 - M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
 
+## Completed Slices (M002)
+- S01: Embedding Abstraction & Vector Index — 3 tasks, 37 tests, completed 2026-03-12
+
 ## Recent Decisions
-- D037: Vectra over Qdrant/Neo4j for semantic recall
-- D038: Embedding model strategy (OpenAI + Ollama behind abstract interface)
-- D039: Semantic recall as enhancement, not replacement
-- D040: Async fire-and-forget embedding at correction write time
+- D041: Fixture vectors for S01 testing, no real API calls
+- D042: Minimal metadata in Vectra items
 
 ## Next Action
-Run `/gsd auto` to begin S01 execution.
+S01 complete. Ready for S02: Semantic Recall in Dispatch.

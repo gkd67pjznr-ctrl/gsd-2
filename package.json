@@ -42,7 +42,8 @@
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.57.1",
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "vectra": "^0.12.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -57,6 +57,9 @@ Total adaptive intelligence contract: 550 test assertions across 12 test suites,
 
 See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement status, and coverage mapping.
 
+- **Embedding abstraction** (M002/S01): EmbeddingProvider interface with OpenAI/Ollama implementations, VectorIndex wrapping Vectra for correction embedding storage and cosine similarity retrieval, graceful degradation when unconfigured — 37 test assertions
+
 ## Milestone Sequence
 
 - [x] M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
+- [ ] M002: Knowledge Infrastructure — Semantic Recall via Vectra — S01 complete, S02-S03 pending
