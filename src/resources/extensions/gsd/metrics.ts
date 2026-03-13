@@ -41,6 +41,8 @@ export interface UnitMetrics {
   assistantMessages: number;
   userMessages: number;
   gateEvents?: GateEvent[];
+  embeddingCost?: number;
+  embeddingTokens?: number;
 }
 
 export interface MetricsLedger {

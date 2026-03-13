@@ -128,3 +128,28 @@ export class VectorIndex {
     }
   }
 }
+
+// ─── Index Rotation ─────────────────────────────────────────────────────────
+
+/**
+ * Rotate a vector index by clearing all items.
+ * Called alongside correction JSONL rotation to keep embeddings in sync.
+ * Silent on all errors per D013 pattern.
+ */
+export async function rotateVectorIndex(indexPath: string): Promise<{ cleared: number }> {
+  try {
+    const index = new LocalIndex(indexPath);
+    const exists = await index.isIndexCreated();
+    if (!exists) return { cleared: 0 };
+
+    const items = await index.listItems();
+    let cleared = 0;
+    for (const item of items) {
+      await index.deleteItem(item.id);
+      cleared++;
+    }
+    return { cleared };
+  } catch {
+    return { cleared: 0 };
+  }
+}

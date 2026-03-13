@@ -139,6 +139,30 @@ function getEmbeddingSingletons(): Promise<{ provider: EmbeddingProvider | null;
   return _embeddingSingletons;
 }
 
+// ─── Embedding Cost Accumulator ───────────────────────────────────────────────
+
+let _embeddingCostAccumulator = 0;
+let _embeddingTokenAccumulator = 0;
+
+/** Add embedding cost data to the running accumulator. */
+export function _addEmbeddingCost(cost: number, tokens: number): void {
+  _embeddingCostAccumulator += cost;
+  _embeddingTokenAccumulator += tokens;
+}
+
+/** Return accumulated costs and reset to zero. */
+export function flushEmbeddingCosts(): { cost: number; tokens: number } {
+  const snapshot = { cost: _embeddingCostAccumulator, tokens: _embeddingTokenAccumulator };
+  _embeddingCostAccumulator = 0;
+  _embeddingTokenAccumulator = 0;
+  return snapshot;
+}
+
+/** Inspect accumulated costs without resetting (for tests). */
+export function _getEmbeddingCostSnapshot(): { cost: number; tokens: number } {
+  return { cost: _embeddingCostAccumulator, tokens: _embeddingTokenAccumulator };
+}
+
 /** Promise chain to serialize concurrent embeddings (Vectra is not concurrency-safe). */
 let _embedChain: Promise<void> = Promise.resolve();
 
@@ -167,6 +191,9 @@ export function embedCorrection(entry: CorrectionEntry): void {
       const { provider, index } = await getEmbeddingSingletons();
       if (!provider || !index) return;
       const result = await provider.embed(entry.correction_to);
+      if (result.cost != null && result.tokensUsed != null) {
+        _addEmbeddingCost(result.cost, result.tokensUsed);
+      }
       if (!result.vector) return;
       await index.addCorrection(entry, result.vector);
     } catch {
@@ -951,6 +978,13 @@ async function dispatchNextUnit(
     const modelId = ctx.model?.id ?? "unknown";
     const unitRecord = snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
     saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+
+    // Flush embedding costs into the unit metrics record
+    const embeddingSnapshot = flushEmbeddingCosts();
+    if (unitRecord && embeddingSnapshot.cost > 0) {
+      unitRecord.embeddingCost = embeddingSnapshot.cost;
+      unitRecord.embeddingTokens = embeddingSnapshot.tokens;
+    }
 
     // Flush quality gate events to the unit metrics record
     const pendingGates = getGateEvents();

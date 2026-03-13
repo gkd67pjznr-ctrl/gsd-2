@@ -4,7 +4,7 @@
 
 GSD 2 (Get Shit Done) is a standalone TypeScript CLI built on the Pi SDK that structures AI-assisted coding into milestones → slices → tasks, with programmatic session management, auto mode, crash recovery, cost tracking, and clean git strategy. It's a complete rewrite of the original GSD prompt framework.
 
-All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified (M001 complete): correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring. M002 (semantic recall via Vectra) is in progress — S01 (embedding abstraction) and S02 (semantic recall in dispatch) complete, S03 (cost tracking & lifecycle) pending.
+All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified (M001 complete): correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring. M002 (semantic recall via Vectra) is complete — S01 (embedding abstraction), S02 (semantic recall in dispatch), and S03 (cost tracking & lifecycle) all done. 114 new test assertions across 3 slices.
 
 ## Core Value
 

@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { CorrectionEntry } from "./correction-types.ts";
 import { isValidEntry } from "./correction-types.ts";
+import { rotateVectorIndex } from "./vector-index.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -251,6 +252,10 @@ export function rotateCorrections(options?: {
       }
 
       renameSync(filePath, archivePath);
+
+      // Rotate vector index alongside JSONL — fire-and-forget (async, silent on errors)
+      const vectorPath = join(patternsDir, 'vectors');
+      rotateVectorIndex(vectorPath).catch(() => {/* silent per D013 */});
     }
 
     // Clean up old archives

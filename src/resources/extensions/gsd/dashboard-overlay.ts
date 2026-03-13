@@ -485,6 +485,24 @@ export class GSDDashboardOverlay {
       }
     }
 
+    // ─── Embedding Cost Section ──────────────────────────────────────────
+    // Show embedding costs when any unit has embedding cost data
+    if (ledger && ledger.units.length > 0) {
+      let totalEmbeddingCost = 0;
+      let totalEmbeddingTokens = 0;
+      for (const u of ledger.units) {
+        if (u.embeddingCost) totalEmbeddingCost += u.embeddingCost;
+        if (u.embeddingTokens) totalEmbeddingTokens += u.embeddingTokens;
+      }
+      if (totalEmbeddingCost > 0) {
+        lines.push(blank());
+        lines.push(hr());
+        lines.push(row(th.fg("text", th.bold("Embedding Costs"))));
+        lines.push(blank());
+        lines.push(row(`Total: ${formatCost(totalEmbeddingCost)}  ${th.fg("dim", "·")}  ${formatTokenCount(totalEmbeddingTokens)} tokens`));
+      }
+    }
+
     lines.push(blank());
     lines.push(hr());
     lines.push(centered(th.fg("dim", "↑↓ scroll · g/G top/end · esc close")));

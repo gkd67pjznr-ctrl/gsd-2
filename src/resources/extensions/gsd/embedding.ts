@@ -15,7 +15,12 @@ export interface EmbeddingConfig {
 export interface EmbedResult {
   vector: number[] | null;
   error?: string;
+  tokensUsed?: number;
+  cost?: number;
 }
+
+/** text-embedding-3-small: $0.02 per 1M tokens */
+export const EMBEDDING_COST_PER_TOKEN = 0.00000002;
 
 export interface EmbeddingProvider {
   readonly name: string;
@@ -62,12 +67,13 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         return { vector: null, error: `openai: HTTP ${res.status} — ${errText}` };
       }
 
-      const json = await res.json() as { data?: Array<{ embedding?: number[] }> };
+      const json = await res.json() as { data?: Array<{ embedding?: number[] }>; usage?: { total_tokens?: number } };
       const embedding = json.data?.[0]?.embedding;
       if (!embedding || !Array.isArray(embedding)) {
         return { vector: null, error: 'openai: no embedding in response' };
       }
-      return { vector: embedding };
+      const tokensUsed = json.usage?.total_tokens ?? 0;
+      return { vector: embedding, tokensUsed, cost: tokensUsed * EMBEDDING_COST_PER_TOKEN };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { vector: null, error: `openai: ${msg}` };
@@ -104,7 +110,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       if (!json.embedding || !Array.isArray(json.embedding)) {
         return { vector: null, error: 'ollama: no embedding in response' };
       }
-      return { vector: json.embedding };
+      return { vector: json.embedding, tokensUsed: 0, cost: 0 };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { vector: null, error: `ollama: ${msg}` };
