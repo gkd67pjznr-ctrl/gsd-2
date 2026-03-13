@@ -4,7 +4,7 @@
 
 GSD 2 (Get Shit Done) is a standalone TypeScript CLI built on the Pi SDK that structures AI-assisted coding into milestones → slices → tasks, with programmatic session management, auto mode, crash recovery, cost tracking, and clean git strategy. It's a complete rewrite of the original GSD prompt framework.
 
-All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified (M001 complete): correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring. M002 (semantic recall via Vectra) is complete — S01 (embedding abstraction), S02 (semantic recall in dispatch), and S03 (cost tracking & lifecycle) all done. 114 new test assertions across 3 slices.
+All five adaptive intelligence capabilities from the gsdup fork have been implemented and verified (M001 complete): correction capture, preference engine, learning loop closure, quality gating, and tech debt tracking with passive monitoring. M002 (semantic recall via Vectra) complete — semantic similarity search augments category-based recall in dispatch prompts, with async embedding, graceful degradation, cost tracking, and index lifecycle management. 114 new test assertions across 3 slices, 9 tasks.
 
 ## Core Value
 
@@ -58,8 +58,10 @@ Total adaptive intelligence contract: 550 test assertions across 12 test suites,
 See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement status, and coverage mapping.
 
 - **Embedding abstraction** (M002/S01): EmbeddingProvider interface with OpenAI/Ollama implementations, VectorIndex wrapping Vectra for correction embedding storage and cosine similarity retrieval, graceful degradation when unconfigured — 37 test assertions
+- **Semantic recall in dispatch** (M002/S02): buildRecallBlock() uses vector similarity when embeddings exist, falls back to category matching when they don't, async embedding at writeCorrection() sites — 60 test assertions
+- **Cost tracking & lifecycle** (M002/S03): Embedding costs on UnitMetrics and dashboard, vector index rotation aligned with correction JSONL lifecycle — 17 test assertions
 
 ## Milestone Sequence
 
 - [x] M001: Adaptive Intelligence — 5 slices, 18 tasks, 550 test assertions, completed 2026-03-11
-- [ ] M002: Knowledge Infrastructure — Semantic Recall via Vectra — S01 complete, S02-S03 pending
+- [x] M002: Knowledge Infrastructure — Semantic Recall via Vectra — 3 slices, 9 tasks, 114 test assertions, completed 2026-03-12

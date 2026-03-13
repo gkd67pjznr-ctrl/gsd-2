@@ -77,9 +77,9 @@ This file is the explicit capability and coverage contract for the project.
 - Why it matters: This is where the learning loop closes — past mistakes are surfaced before they can repeat
 - Source: user
 - Primary owning slice: M001/S03
-- Supporting slices: none
-- Validation: validated — 22 test assertions prove recall assembly with token budget (3K cap), 10-slot allocation (preferences first), deduplication (promoted corrections excluded), kill switch, and self-report preservation. buildCorrectionsVar() in auto.ts calls buildRecallBlock() (S03)
-- Notes: Implemented via buildRecallBlock() in recall.ts, wired into auto.ts buildCorrectionsVar(). Token estimation uses words/0.75. Self-report instructions appended after dynamic recall block.
+- Supporting slices: M002/S01, M002/S02
+- Validation: validated — 22 test assertions prove recall assembly with token budget (3K cap), 10-slot allocation (preferences first), deduplication (promoted corrections excluded), kill switch, and self-report preservation. M002 adds 24 semantic-recall tests proving vector similarity query path with category-based fallback, plus 27 existing recall tests preserved. buildCorrectionsVar() in auto.ts calls async buildRecallBlock() (S03, extended M002/S02)
+- Notes: Implemented via buildRecallBlock() in recall.ts, wired into auto.ts buildCorrectionsVar(). Token estimation uses words/0.75. Self-report instructions appended after dynamic recall block. M002 extended with vector similarity search via Vectra — when embedding model configured, recall uses cosine similarity; when unconfigured, falls back to category-based matching identically to M001.
 
 ### R008 — Skill Refinement Workflow
 - Class: core-capability
@@ -227,7 +227,7 @@ This file is the explicit capability and coverage contract for the project.
 | R004 | core-capability | active | M001/S02 | none | validated (S02) |
 | R005 | core-capability | active | M001/S02 | none | validated (S02) |
 | R006 | core-capability | active | M001/S02 | M001/S03 | partial (S02) |
-| R007 | core-capability | active | M001/S03 | none | validated (S03) |
+| R007 | core-capability | active | M001/S03 | M002/S01, M002/S02 | validated (S03, extended M002/S02) |
 | R008 | core-capability | active | M001/S03 | none | validated (S03) |
 | R009 | differentiator | active | M001/S03 | none | validated (S03) |
 | R010 | core-capability | active | M001/S04 | none | validated (S04) |
