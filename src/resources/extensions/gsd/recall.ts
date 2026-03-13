@@ -25,6 +25,8 @@ import { readPreferences } from "./pattern-preferences.ts";
 import { readUserPreferences } from "./promote-preference.js";
 import type { CorrectionEntry } from "./correction-types.ts";
 import type { PreferenceEntry } from "./preference-types.ts";
+import type { EmbeddingProvider } from "./embedding.ts";
+import type { VectorIndex, ScoredCorrection } from "./vector-index.ts";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -96,6 +98,30 @@ function isCaptureDisabled(cwd: string): boolean {
   }
 }
 
+// ─── Category-Based Corrections (sync fallback) ────────────────────────────
+
+function getCategoryBasedCorrections(
+  cwd: string,
+  promotedKeys: Set<string>,
+  remainingSlots: number,
+): Array<{ diagnosis_category: string; correction_to: string }> {
+  const corrections = readCorrections({ status: "active" }, { cwd });
+
+  const filteredCorrections = corrections.filter((c: CorrectionEntry) => {
+    if (!c.diagnosis_category || !c.scope) return true;
+    return !promotedKeys.has(`${c.diagnosis_category}:${c.scope}`);
+  });
+
+  filteredCorrections.sort((a, b) =>
+    (a.timestamp || "").localeCompare(b.timestamp || ""),
+  );
+
+  return filteredCorrections.slice(0, remainingSlots).map(c => ({
+    diagnosis_category: c.diagnosis_category || "unknown",
+    correction_to: c.correction_to || "",
+  }));
+}
+
 // ─── Build Recall Block ────────────────────────────────────────────────────
 
 /**
@@ -117,7 +143,12 @@ function isCaptureDisabled(cwd: string): boolean {
  *
  * Never throws. Returns "" on any error.
  */
-export function buildRecallBlock(options?: { cwd?: string }): string {
+export async function buildRecallBlock(options?: {
+  cwd?: string;
+  provider?: EmbeddingProvider;
+  vectorIndex?: VectorIndex;
+  taskContext?: string;
+}): Promise<string> {
   try {
     const cwd = options?.cwd ?? process.cwd();
 
@@ -160,8 +191,6 @@ export function buildRecallBlock(options?: { cwd?: string }): string {
       }
     }
 
-    const corrections = readCorrections({ status: "active" }, { cwd });
-
     // Dedup: build Set of category:scope from preferences
     const promotedKeys = new Set<string>();
     for (const p of preferences) {
@@ -170,23 +199,38 @@ export function buildRecallBlock(options?: { cwd?: string }): string {
       }
     }
 
-    // Filter corrections: exclude those already captured as a preference
-    const filteredCorrections = corrections.filter((c: CorrectionEntry) => {
-      if (!c.diagnosis_category || !c.scope) return true; // keep malformed entries
-      return !promotedKeys.has(`${c.diagnosis_category}:${c.scope}`);
-    });
-
-    // Sort corrections chronologically (ascending) for stable, fair recall ordering.
-    // readCorrections() returns descending; we reverse so oldest corrections get
-    // their slot first rather than always being displaced by recent ones.
-    filteredCorrections.sort((a, b) =>
-      (a.timestamp || "").localeCompare(b.timestamp || ""),
-    );
-
     // Slot allocation: preferences get priority, then corrections fill remaining
     const selectedPrefs = preferences.slice(0, MAX_ENTRIES);
     const remainingSlots = Math.max(0, MAX_ENTRIES - selectedPrefs.length);
-    const selectedCorrs = filteredCorrections.slice(0, remainingSlots);
+
+    let selectedCorrs: Array<{ diagnosis_category: string; correction_to: string }>;
+
+    // Vector path: use similarity search when all three params are provided
+    if (options?.provider && options?.vectorIndex && options?.taskContext) {
+      let vectorResults: ScoredCorrection[] = [];
+      try {
+        const embedResult = await options.provider.embed(options.taskContext);
+        if (embedResult.vector) {
+          vectorResults = await options.vectorIndex.querySimilar(embedResult.vector, remainingSlots + 10);
+        }
+      } catch {
+        // Embed/query failure — fall through to category-based fallback
+      }
+
+      if (vectorResults.length > 0) {
+        // Dedup against promoted preferences and apply slot limit
+        selectedCorrs = vectorResults
+          .filter(c => !promotedKeys.has(`${c.diagnosis_category}:${c.scope}`))
+          .slice(0, remainingSlots)
+          .map(c => ({ diagnosis_category: c.diagnosis_category, correction_to: c.correction_to }));
+      } else {
+        // Embed failure or empty index — fall back to category-based logic
+        selectedCorrs = getCategoryBasedCorrections(cwd, promotedKeys, remainingSlots);
+      }
+    } else {
+      // No vector config — use category-based logic (original sync path)
+      selectedCorrs = getCategoryBasedCorrections(cwd, promotedKeys, remainingSlots);
+    }
 
     // Empty state: no recall data → self-report instructions only
     if (selectedPrefs.length === 0 && selectedCorrs.length === 0) {

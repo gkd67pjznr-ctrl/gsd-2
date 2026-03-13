@@ -70,6 +70,9 @@ import { buildRecallBlock } from "./recall.js";
 import type { SessionEntry as DetectorSessionEntry } from "./correction-detector.ts";
 import { writeCorrection } from "./corrections.ts";
 import type { CorrectionEntry } from "./correction-types.ts";
+import { createEmbeddingProvider } from "./embedding.js";
+import type { EmbeddingProvider } from "./embedding.js";
+import { VectorIndex } from "./vector-index.js";
 import { checkAndPromote } from "./pattern-preferences.ts";
 import { analyzePatterns } from "./observer.ts";
 import { diffPlanVsSummary } from "./passive-monitor.ts";
@@ -110,6 +113,67 @@ let originalModelId: string | null = null;
 /** Progress-aware timeout supervision */
 let unitTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 let wrapupWarningHandle: ReturnType<typeof setTimeout> | null = null;
+
+// ─── Embedding Singletons ─────────────────────────────────────────────────────
+
+let _embeddingSingletons: Promise<{ provider: EmbeddingProvider | null; index: VectorIndex | null }> | null = null;
+
+function getEmbeddingSingletons(): Promise<{ provider: EmbeddingProvider | null; index: VectorIndex | null }> {
+  if (!_embeddingSingletons) {
+    _embeddingSingletons = (async () => {
+      const providerName = process.env.GSD_EMBEDDING_PROVIDER as 'openai' | 'ollama' | undefined;
+      const model = process.env.GSD_EMBEDDING_MODEL;
+      if (!providerName || !model) return { provider: null, index: null };
+      const provider = createEmbeddingProvider({
+        provider: providerName,
+        model,
+        apiKey: process.env.GSD_EMBEDDING_API_KEY,
+      });
+      if (!provider) return { provider: null, index: null };
+      const indexPath = join(basePath, '.gsd', 'patterns', 'vectors');
+      const index = new VectorIndex(indexPath);
+      await index.initialize();
+      return { provider, index };
+    })();
+  }
+  return _embeddingSingletons;
+}
+
+/** Promise chain to serialize concurrent embeddings (Vectra is not concurrency-safe). */
+let _embedChain: Promise<void> = Promise.resolve();
+
+/** Get the current embed chain promise (for testing serialization). */
+export function _getEmbedChain(): Promise<void> { return _embedChain; }
+
+/** Reset embedding singletons (for testing only). */
+export function _resetEmbeddingSingletons(): void {
+  _embeddingSingletons = null;
+  _embedChain = Promise.resolve();
+}
+
+/**
+ * Fire-and-forget async embedding of a correction entry.
+ * Never throws. Respects kill switch. Serialized via promise chain.
+ */
+export function embedCorrection(entry: CorrectionEntry): void {
+  try {
+    const prefs = loadEffectiveGSDPreferences()?.preferences;
+    if (prefs?.correction_capture === false) return;
+  } catch {
+    return;
+  }
+  _embedChain = _embedChain.then(async () => {
+    try {
+      const { provider, index } = await getEmbeddingSingletons();
+      if (!provider || !index) return;
+      const result = await provider.embed(entry.correction_to);
+      if (!result.vector) return;
+      await index.addCorrection(entry, result.vector);
+    } catch {
+      // Swallowed — embedding failures must never block dispatch (D040)
+    }
+  });
+}
 let idleWatchdogHandle: ReturnType<typeof setInterval> | null = null;
 
 /** Dashboard data for the overlay */
@@ -924,7 +988,7 @@ async function dispatchNextUnit(
               const diagCategory = obs.kind === "shift"
                 ? "process.planning_error" as const
                 : "code.scope_drift" as const;
-              writeCorrection({
+              const driftEntry = {
                 correction_from: `Slice ${pmMid}/${pmSid} plan`,
                 correction_to: `Slice ${pmMid}/${pmSid} summary — ${obs.kind}: ${obs.details}`,
                 diagnosis_category: diagCategory,
@@ -936,7 +1000,9 @@ async function dispatchNextUnit(
                 source: "programmatic",
                 unit_type: "complete-slice",
                 unit_id: currentUnit.id,
-              } satisfies CorrectionEntry, { cwd: basePath });
+              } satisfies CorrectionEntry;
+              writeCorrection(driftEntry, { cwd: basePath });
+              embedCorrection(driftEntry);
             }
           }
         }
@@ -1179,8 +1245,12 @@ const SELF_REPORT_INSTRUCTIONS = `
  * Returns the self-report instruction block if correction capture is enabled,
  * or empty string if disabled.
  */
-function buildCorrectionsVar(): string {
-  return buildRecallBlock();
+async function buildCorrectionsVar(): Promise<string> {
+  const { provider, index } = await getEmbeddingSingletons();
+  return buildRecallBlock({
+    provider: provider ?? undefined,
+    vectorIndex: index ?? undefined,
+  });
 }
 
 function buildQualityVar(): string {
@@ -1272,6 +1342,7 @@ function emitProgrammaticCorrections(
 
     for (const correction of corrections) {
       writeCorrection(correction, { cwd: basePath });
+      embedCorrection(correction);
       try {
         checkAndPromote(
           { category: correction.diagnosis_category, scope: correction.scope },
@@ -1310,6 +1381,7 @@ function emitStuckCorrection(unitType: string, unitId: string): void {
     };
 
     writeCorrection(entry, { cwd: basePath });
+    embedCorrection(entry);
     try {
       checkAndPromote(
         { category: entry.diagnosis_category, scope: entry.scope },
@@ -1595,7 +1667,7 @@ async function buildExecuteTaskPrompt(
     resumeSection,
     priorTaskLines: priorLines,
     taskSummaryAbsPath,
-    corrections: buildCorrectionsVar(),
+    corrections: await buildCorrectionsVar(),
     quality: buildQualityVar(),
   });
 }

@@ -119,6 +119,9 @@ function writePreferencesMd(correctionCapture: boolean): void {
   );
 }
 
+// ─── Wrap all tests in async IIFE (buildRecallBlock is now async) ─────────
+(async () => {
+
 // ─── Test: empty state returns self-report instructions only ──────────────
 
 console.log("\n=== buildRecallBlock — empty state ===");
@@ -127,7 +130,7 @@ console.log("\n=== buildRecallBlock — empty state ===");
   setup();
 
   // No corrections, no preferences
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   // With no learned data, should still return self-report instructions
   assert(typeof result === "string", "returns a string");
@@ -150,7 +153,7 @@ console.log("\n=== buildRecallBlock — preferences only ===");
   ];
   writePreferences(prefs);
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   assert(result.includes("<system-reminder>"), "wraps in system-reminder block");
   assert(result.includes("</system-reminder>"), "closes system-reminder block");
@@ -173,7 +176,7 @@ console.log("\n=== buildRecallBlock — corrections only ===");
   ];
   writeCorrections(corrections);
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   assert(result.includes("<system-reminder>"), "wraps in system-reminder block");
   assert(result.includes("Use the existing utility function"), "includes first correction text");
@@ -209,7 +212,7 @@ console.log("\n=== buildRecallBlock — mixed slot allocation ===");
   }
   writeCorrections(corrections);
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   // All 4 preferences should appear
   assert(result.includes("Pref 1"), "preference 1 included");
@@ -244,7 +247,7 @@ console.log("\n=== buildRecallBlock — token budget (20 verbose entries under 3
   }
   writeCorrections(verboseCorrections);
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
   const tokenCount = estimateTokens(result);
 
   assert(tokenCount <= 3000, `token count ≤ 3000 (got ${tokenCount})`);
@@ -285,7 +288,7 @@ console.log("\n=== buildRecallBlock — dedup (corrections matching preference e
   ];
   writeCorrections(corrections);
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   assert(result.includes("Promoted preference for wrong_pattern:file"), "preference included");
   assert(!result.includes("should be EXCLUDED"), "matching correction excluded by dedup");
@@ -312,7 +315,7 @@ console.log("\n=== buildRecallBlock — kill switch ===");
   process.chdir(tmpDir);
 
   try {
-    const result = buildRecallBlock({ cwd: tmpDir });
+    const result = await buildRecallBlock({ cwd: tmpDir });
     assertEq(result, "", "kill switch returns empty string");
   } finally {
     process.chdir(originalCwd);
@@ -330,7 +333,7 @@ console.log("\n=== buildRecallBlock — self-report instructions preserved ===")
 
   writePreferences([makePreference({ preference_text: "Test preference for self-report check" })]);
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   // Self-report instructions should appear after the recall block
   const reminderEnd = result.lastIndexOf("</system-reminder>");
@@ -382,7 +385,7 @@ console.log("\n=== buildRecallBlock — user-level preferences ===");
   writeFileSync(userPrefsPath, JSON.stringify(userDoc, null, 2));
 
   // No project-level preferences — only user-level
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   assert(result.includes("Always check docs before assuming API shape"), "promoted user-level preference included in recall");
   assert(!result.includes("This should NOT appear"), "non-promoted user-level preference excluded");
@@ -425,7 +428,7 @@ console.log("\n=== buildRecallBlock — project-level dedup over user-level ==="
   };
   writeFileSync(userPrefsPath, JSON.stringify(userDoc, null, 2));
 
-  const result = buildRecallBlock({ cwd: tmpDir });
+  const result = await buildRecallBlock({ cwd: tmpDir });
 
   assert(result.includes("Project-level: use helper function"), "project-level preference present");
   assert(!result.includes("User-level: this should be deduped out"), "user-level duplicate excluded — project wins");
@@ -442,3 +445,5 @@ if (failed > 0) {
 } else {
   console.log("All tests passed ✓");
 }
+
+})();

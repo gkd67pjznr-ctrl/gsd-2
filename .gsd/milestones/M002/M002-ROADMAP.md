@@ -51,7 +51,7 @@ This milestone is complete only when all are true:
 
 - [x] **S01: Embedding Abstraction & Vector Index** `risk:high` `depends:[]`
   > After this: `embedText()` produces vectors via OpenAI or Ollama, `VectorIndex` wraps Vectra to store/query correction embeddings in `.gsd/patterns/vectors/`, and test assertions prove similarity search returns semantically relevant results ranked by cosine distance in <50ms
-- [ ] **S02: Semantic Recall in Dispatch** `risk:medium` `depends:[S01]`
+- [x] **S02: Semantic Recall in Dispatch** `risk:medium` `depends:[S01]`
   > After this: `buildRecallBlock()` uses vector similarity when embeddings exist, falls back to category matching when they don't, embedding is triggered asynchronously from `writeCorrection()` in auto.ts, and dispatch prompts contain semantically relevant past corrections — proven by tests and a real auto-mode dispatch
 - [ ] **S03: Cost Tracking & Index Lifecycle** `risk:low` `depends:[S01,S02]`
   > After this: embedding API costs appear in the metrics ledger and dashboard, vector indices rotate/clean up alongside correction JSONL rotation, and the complete pipeline (capture → embed → recall → track) is proven end-to-end with all existing tests still passing
