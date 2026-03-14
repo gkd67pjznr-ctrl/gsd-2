@@ -1,7 +1,7 @@
-import { spawnSync } from "child_process";
 import { readdirSync, statSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
+import { fuzzyFind } from "@gsd/native/fd";
 import { fuzzyFilter } from "./fuzzy.js";
 
 const PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
@@ -84,67 +84,6 @@ function buildCompletionValue(
 	return `${openQuote}${path}${closeQuote}`;
 }
 
-// Use fd to walk directory tree (fast, respects .gitignore)
-function walkDirectoryWithFd(
-	baseDir: string,
-	fdPath: string,
-	query: string,
-	maxResults: number,
-): Array<{ path: string; isDirectory: boolean }> {
-	const args = [
-		"--base-directory",
-		baseDir,
-		"--max-results",
-		String(maxResults),
-		"--type",
-		"f",
-		"--type",
-		"d",
-		"--full-path",
-		"--hidden",
-		"--exclude",
-		".git",
-		"--exclude",
-		".git/*",
-		"--exclude",
-		".git/**",
-	];
-
-	// Add query as pattern if provided
-	if (query) {
-		args.push(query);
-	}
-
-	const result = spawnSync(fdPath, args, {
-		encoding: "utf-8",
-		stdio: ["pipe", "pipe", "pipe"],
-		maxBuffer: 10 * 1024 * 1024,
-	});
-
-	if (result.status !== 0 || !result.stdout) {
-		return [];
-	}
-
-	const lines = result.stdout.trim().split("\n").filter(Boolean);
-	const results: Array<{ path: string; isDirectory: boolean }> = [];
-
-	for (const line of lines) {
-		const normalizedPath = line.endsWith("/") ? line.slice(0, -1) : line;
-		if (normalizedPath === ".git" || normalizedPath.startsWith(".git/") || normalizedPath.includes("/.git/")) {
-			continue;
-		}
-
-		// fd outputs directories with trailing /
-		const isDirectory = line.endsWith("/");
-		results.push({
-			path: line,
-			isDirectory,
-		});
-	}
-
-	return results;
-}
-
 export interface AutocompleteItem {
 	value: string;
 	label: string;
@@ -190,16 +129,13 @@ export interface AutocompleteProvider {
 export class CombinedAutocompleteProvider implements AutocompleteProvider {
 	private commands: (SlashCommand | AutocompleteItem)[];
 	private basePath: string;
-	private fdPath: string | null;
 
 	constructor(
 		commands: (SlashCommand | AutocompleteItem)[] = [],
 		basePath: string = process.cwd(),
-		fdPath: string | null = null,
 	) {
 		this.commands = commands;
 		this.basePath = basePath;
-		this.fdPath = fdPath;
 	}
 
 	getSuggestions(
@@ -614,59 +550,28 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		}
 	}
 
-	// Score an entry against the query (higher = better match)
-	// isDirectory adds bonus to prioritize folders
-	private scoreEntry(filePath: string, query: string, isDirectory: boolean): number {
-		const fileName = basename(filePath);
-		const lowerFileName = fileName.toLowerCase();
-		const lowerQuery = query.toLowerCase();
-
-		let score = 0;
-
-		// Exact filename match (highest)
-		if (lowerFileName === lowerQuery) score = 100;
-		// Filename starts with query
-		else if (lowerFileName.startsWith(lowerQuery)) score = 80;
-		// Substring match in filename
-		else if (lowerFileName.includes(lowerQuery)) score = 50;
-		// Substring match in full path
-		else if (filePath.toLowerCase().includes(lowerQuery)) score = 30;
-
-		// Directories get a bonus to appear first
-		if (isDirectory && score > 0) score += 10;
-
-		return score;
-	}
-
-	// Fuzzy file search using fd (fast, respects .gitignore)
+	// Fuzzy file search using the native fd module (fast, respects .gitignore)
 	private getFuzzyFileSuggestions(query: string, options: { isQuotedPrefix: boolean }): AutocompleteItem[] {
-		if (!this.fdPath) {
-			// fd not available, return empty results
-			return [];
-		}
-
 		try {
 			const scopedQuery = this.resolveScopedFuzzyQuery(query);
-			const fdBaseDir = scopedQuery?.baseDir ?? this.basePath;
-			const fdQuery = scopedQuery?.query ?? query;
-			const entries = walkDirectoryWithFd(fdBaseDir, this.fdPath, fdQuery, 100);
+			const searchPath = scopedQuery?.baseDir ?? this.basePath;
+			const searchQuery = scopedQuery?.query ?? query;
 
-			// Score entries
-			const scoredEntries = entries
-				.map((entry) => ({
-					...entry,
-					score: fdQuery ? this.scoreEntry(entry.path, fdQuery, entry.isDirectory) : 1,
-				}))
-				.filter((entry) => entry.score > 0);
+			const result = fuzzyFind({
+				query: searchQuery,
+				path: searchPath,
+				hidden: true,
+				gitignore: true,
+				maxResults: 100,
+			});
 
-			// Sort by score (descending) and take top 20
-			scoredEntries.sort((a, b) => b.score - a.score);
-			const topEntries = scoredEntries.slice(0, 20);
+			// Take top 20 matches (already sorted by score descending from native module)
+			const topMatches = result.matches.slice(0, 20);
 
 			// Build suggestions
 			const suggestions: AutocompleteItem[] = [];
-			for (const { path: entryPath, isDirectory } of topEntries) {
-				// fd already includes trailing / for directories
+			for (const { path: entryPath, isDirectory } of topMatches) {
+				// Native module includes trailing / for directories
 				const pathWithoutSlash = isDirectory ? entryPath.slice(0, -1) : entryPath;
 				const displayPath = scopedQuery
 					? this.scopedPathForDisplay(scopedQuery.displayBase, pathWithoutSlash)

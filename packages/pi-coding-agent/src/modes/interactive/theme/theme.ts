@@ -4,7 +4,11 @@ import type { EditorTheme, MarkdownTheme, SelectListTheme } from "@gsd/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import chalk from "chalk";
-import { highlight, supportsLanguage } from "cli-highlight";
+import {
+	highlightCode as nativeHighlightCode,
+	supportsLanguage,
+	type HighlightColors,
+} from "@gsd/native";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
 
 // ============================================================================
@@ -921,37 +925,29 @@ export function getThemeExportColors(themeName?: string): {
 // TUI Helpers
 // ============================================================================
 
-type CliHighlightTheme = Record<string, (s: string) => string>;
+let cachedHighlightColorsFor: Theme | undefined;
+let cachedHighlightColors: HighlightColors | undefined;
 
-let cachedHighlightThemeFor: Theme | undefined;
-let cachedCliHighlightTheme: CliHighlightTheme | undefined;
-
-function buildCliHighlightTheme(t: Theme): CliHighlightTheme {
+function buildHighlightColors(t: Theme): HighlightColors {
 	return {
-		keyword: (s: string) => t.fg("syntaxKeyword", s),
-		built_in: (s: string) => t.fg("syntaxType", s),
-		literal: (s: string) => t.fg("syntaxNumber", s),
-		number: (s: string) => t.fg("syntaxNumber", s),
-		string: (s: string) => t.fg("syntaxString", s),
-		comment: (s: string) => t.fg("syntaxComment", s),
-		function: (s: string) => t.fg("syntaxFunction", s),
-		title: (s: string) => t.fg("syntaxFunction", s),
-		class: (s: string) => t.fg("syntaxType", s),
-		type: (s: string) => t.fg("syntaxType", s),
-		attr: (s: string) => t.fg("syntaxVariable", s),
-		variable: (s: string) => t.fg("syntaxVariable", s),
-		params: (s: string) => t.fg("syntaxVariable", s),
-		operator: (s: string) => t.fg("syntaxOperator", s),
-		punctuation: (s: string) => t.fg("syntaxPunctuation", s),
+		comment: t.getFgAnsi("syntaxComment"),
+		keyword: t.getFgAnsi("syntaxKeyword"),
+		function: t.getFgAnsi("syntaxFunction"),
+		variable: t.getFgAnsi("syntaxVariable"),
+		string: t.getFgAnsi("syntaxString"),
+		number: t.getFgAnsi("syntaxNumber"),
+		type: t.getFgAnsi("syntaxType"),
+		operator: t.getFgAnsi("syntaxOperator"),
+		punctuation: t.getFgAnsi("syntaxPunctuation"),
 	};
 }
 
-function getCliHighlightTheme(t: Theme): CliHighlightTheme {
-	if (cachedHighlightThemeFor !== t || !cachedCliHighlightTheme) {
-		cachedHighlightThemeFor = t;
-		cachedCliHighlightTheme = buildCliHighlightTheme(t);
+function getHighlightColors(t: Theme): HighlightColors {
+	if (cachedHighlightColorsFor !== t || !cachedHighlightColors) {
+		cachedHighlightColorsFor = t;
+		cachedHighlightColors = buildHighlightColors(t);
 	}
-	return cachedCliHighlightTheme;
+	return cachedHighlightColors;
 }
 
 /**
@@ -959,15 +955,9 @@ function getCliHighlightTheme(t: Theme): CliHighlightTheme {
  * Returns array of highlighted lines.
  */
 export function highlightCode(code: string, lang?: string): string[] {
-	// Validate language before highlighting to avoid stderr spam from cli-highlight
-	const validLang = lang && supportsLanguage(lang) ? lang : undefined;
-	const opts = {
-		language: validLang,
-		ignoreIllegals: true,
-		theme: getCliHighlightTheme(theme),
-	};
+	const validLang = lang && supportsLanguage(lang) ? lang : null;
 	try {
-		return highlight(code, opts).split("\n");
+		return nativeHighlightCode(code, validLang, getHighlightColors(theme)).split("\n");
 	} catch {
 		return code.split("\n");
 	}
@@ -1061,15 +1051,9 @@ export function getMarkdownTheme(): MarkdownTheme {
 		underline: (text: string) => theme.underline(text),
 		strikethrough: (text: string) => chalk.strikethrough(text),
 		highlightCode: (code: string, lang?: string): string[] => {
-			// Validate language before highlighting to avoid stderr spam from cli-highlight
-			const validLang = lang && supportsLanguage(lang) ? lang : undefined;
-			const opts = {
-				language: validLang,
-				ignoreIllegals: true,
-				theme: getCliHighlightTheme(theme),
-			};
+			const validLang = lang && supportsLanguage(lang) ? lang : null;
 			try {
-				return highlight(code, opts).split("\n");
+				return nativeHighlightCode(code, validLang, getHighlightColors(theme)).split("\n");
 			} catch {
 				return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
 			}

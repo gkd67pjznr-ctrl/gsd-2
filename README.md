@@ -300,7 +300,11 @@ GSD preferences live in `~/.gsd/preferences.md` (global) or `.gsd/preferences.md
 version: 1
 models:
   research: claude-sonnet-4-6
-  planning: claude-opus-4-6
+  planning:
+    model: claude-opus-4-6
+    fallbacks:
+      - openrouter/z-ai/glm-5
+      - openrouter/minimax/minimax-m2.5
   execution: claude-sonnet-4-6
   completion: claude-sonnet-4-6
 skill_discovery: suggest
@@ -316,7 +320,7 @@ budget_ceiling: 50.00
 
 | Setting | What it controls |
 |---------|-----------------|
-| `models.*` | Per-phase model selection (Opus for planning, Sonnet for execution, etc.) |
+| `models.*` | Per-phase model selection — string for a single model, or `{model, fallbacks}` for automatic failover |
 | `skill_discovery` | `auto` / `suggest` / `off` — how GSD finds and applies skills |
 | `auto_supervisor.*` | Timeout thresholds for auto mode supervision |
 | `budget_ceiling` | USD ceiling — auto mode pauses when reached |
@@ -326,12 +330,12 @@ budget_ceiling: 50.00
 
 ### Bundled Tools
 
-GSD ships with 13 extensions, all loaded automatically:
+GSD ships with 14 extensions, all loaded automatically:
 
 | Extension | What it provides |
 |-----------|-----------------|
 | **GSD** | Core workflow engine, auto mode, commands, dashboard |
-| **Browser Tools** | Playwright-based browser for UI verification |
+| **Browser Tools** | Playwright-based browser with form intelligence, intent-ranked element finding, and semantic actions |
 | **Search the Web** | Brave Search, Tavily, or Jina page extraction |
 | **Google Search** | Gemini-powered web search with AI-synthesized answers |
 | **Context7** | Up-to-date library/framework documentation |
@@ -341,6 +345,7 @@ GSD ships with 13 extensions, all loaded automatically:
 | **MCPorter** | Lazy on-demand MCP server integration |
 | **Voice** | Real-time speech-to-text transcription (macOS) |
 | **Slash Commands** | Custom command creation |
+| **LSP** | Language Server Protocol integration — diagnostics, go-to-definition, references, hover, symbols, rename, code actions |
 | **Ask User Questions** | Structured user input with single/multi-select |
 | **Secure Env Collect** | Masked secret collection without manual .env editing |
 
@@ -412,6 +417,8 @@ Anthropic, OpenAI, Google (Gemini), OpenRouter, GitHub Copilot, Amazon Bedrock, 
 
 If you have a **Claude Max**, **Codex**, or **GitHub Copilot** subscription, you can use those directly — Pi handles the OAuth flow. No API key needed.
 
+> **Note:** Using OAuth tokens from subscription plans (e.g. Claude Max) outside their native applications may not be explicitly permitted by the provider's Terms of Service. GSD supports API key authentication for all providers as an alternative. Use at your own discretion.
+
 ### OpenRouter
 
 [OpenRouter](https://openrouter.ai) gives you access to hundreds of models through a single API key. Use it to run GSD with Llama, DeepSeek, Qwen, or anything else OpenRouter supports.
@@ -423,12 +430,15 @@ In your preferences (`/gsd prefs`), assign different models to different phases:
 ```yaml
 models:
   research: openrouter/deepseek/deepseek-r1
-  planning: claude-opus-4-6
+  planning:
+    model: claude-opus-4-6
+    fallbacks:
+      - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6
   completion: claude-sonnet-4-6
 ```
 
-Use expensive models where quality matters (planning, complex execution) and cheaper/faster models where speed matters (research, simple completions). GSD tracks cost per-model so you can see exactly where your budget goes.
+Use expensive models where quality matters (planning, complex execution) and cheaper/faster models where speed matters (research, simple completions). Each phase accepts a simple model string or an object with `model` and `fallbacks` — if the primary model fails (provider outage, rate limit, credit exhaustion), GSD automatically tries the next fallback. GSD tracks cost per-model so you can see exactly where your budget goes.
 
 ---
 

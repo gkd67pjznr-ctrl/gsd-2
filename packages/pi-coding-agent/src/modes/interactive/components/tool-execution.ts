@@ -3,7 +3,6 @@ import {
 	Box,
 	Container,
 	getCapabilities,
-	getImageDimensions,
 	Image,
 	imageFallback,
 	Spacer,
@@ -491,6 +490,10 @@ export class ToolExecutionComponent extends Container {
 						{ fallbackColor: (s: string) => theme.fg("toolOutput", s) },
 						{ maxWidthCells: 60 },
 					);
+					imageComponent.setOnDimensionsResolved(() => {
+						this.updateDisplay();
+						this.ui.requestRender();
+					});
 					this.imageComponents.push(imageComponent);
 					this.addChild(imageComponent);
 				}
@@ -601,8 +604,7 @@ export class ToolExecutionComponent extends Container {
 		if (imageBlocks.length > 0 && (!caps.images || !this.showImages)) {
 			const imageIndicators = imageBlocks
 				.map((img: any) => {
-					const dims = img.data ? (getImageDimensions(img.data, img.mimeType) ?? undefined) : undefined;
-					return imageFallback(img.mimeType, dims);
+					return imageFallback(img.mimeType);
 				})
 				.join("\n");
 			output = output ? `${output}\n${imageIndicators}` : imageIndicators;
@@ -631,7 +633,9 @@ export class ToolExecutionComponent extends Container {
 			text = `${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`;
 
 			if (this.result) {
-				const output = this.getTextOutput();
+				const rawOutput = this.getTextOutput();
+				// Strip hashline prefixes (e.g. "1#BQ:content") for TUI display
+				const output = rawOutput.replace(/^(\s*)\d+#[ZPMQVRWSNKTXJBYH]{2}:/gm, "$1");
 				const rawPath = str(this.args?.file_path ?? this.args?.path);
 				const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
 				const lines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");

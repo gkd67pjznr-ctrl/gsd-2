@@ -20,22 +20,20 @@
 
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
 } from "@gsd/pi-coding-agent";
-import { createBashTool, createWriteTool, createReadTool, createEditTool } from "@gsd/pi-coding-agent";
+import { createBashTool, createWriteTool, createReadTool, createEditTool, isToolCallEventType } from "@gsd/pi-coding-agent";
 
 import { registerGSDCommand } from "./commands.js";
+import { registerExitCommand } from "./exit-command.js";
 import { registerWorktreeCommand, getWorktreeOriginalCwd, getActiveWorktreeName } from "./worktree-command.js";
 import { saveFile, formatContinue, loadFile, parseContinue, parseSummary } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { deriveState } from "./state.js";
 import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData } from "./auto.js";
-import { isAutoActive as isStatusAutoActive, getGSDMode } from "./status.js";
-import { checkQuickEnd } from "./quick.js";
-import { checkChatEnd } from "./chat.js";
-import { buildRecallBlock } from "./recall.js";
 import { saveActivityLog } from "./activity-log.js";
-import { checkAutoStartAfterDiscuss } from "./guided-flow.js";
+import { checkAutoStartAfterDiscuss, getDiscussionMilestoneId } from "./guided-flow.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
 import {
   loadEffectiveGSDPreferences,
@@ -46,13 +44,39 @@ import { hasSkillSnapshot, detectNewSkills, formatSkillsXml } from "./skill-disc
 import {
   resolveSlicePath, resolveSliceFile, resolveTaskFile, resolveTaskFiles, resolveTasksDir,
   relSliceFile, relSlicePath, relTaskFile,
-  buildSliceFileName, gsdRoot,
+  buildSliceFileName, buildMilestoneFileName, gsdRoot, resolveMilestonePath,
 } from "./paths.js";
 import { Key } from "@gsd/pi-tui";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { shortcutDesc } from "../shared/terminal.js";
 import { Text } from "@gsd/pi-tui";
+
+// ── Depth verification state ──────────────────────────────────────────────
+let depthVerificationDone = false;
+
+export function isDepthVerified(): boolean {
+  return depthVerificationDone;
+}
+
+// ── Write-gate: block CONTEXT.md writes during discussion without depth verification ──
+const MILESTONE_CONTEXT_RE = /M\d+-CONTEXT\.md$/;
+
+export function shouldBlockContextWrite(
+  toolName: string,
+  inputPath: string,
+  milestoneId: string | null,
+  depthVerified: boolean,
+): { block: boolean; reason?: string } {
+  if (toolName !== "write") return { block: false };
+  if (!milestoneId) return { block: false };
+  if (!MILESTONE_CONTEXT_RE.test(inputPath)) return { block: false };
+  if (depthVerified) return { block: false };
+  return {
+    block: true,
+    reason: `Blocked: Cannot write to milestone CONTEXT.md during discussion phase without depth verification. Call ask_user_questions with question id "depth_verification" first to confirm discussion depth before writing context.`,
+  };
+}
 
 // ── ASCII logo ────────────────────────────────────────────────────────────
 const GSD_LOGO_LINES = [
@@ -67,22 +91,12 @@ const GSD_LOGO_LINES = [
 export default function (pi: ExtensionAPI) {
   registerGSDCommand(pi);
   registerWorktreeCommand(pi);
-
-  // ── /exit — graceful exit (cleanup auto-mode, save state) ──────────────
-  pi.registerCommand("exit", {
-    description: "Exit GSD gracefully (saves auto-mode state)",
-    handler: async (_ctx) => {
-      // Gracefully stop auto-mode if running (saves activity log, clears locks)
-      const { stopAuto } = await import("./auto.js");
-      await stopAuto(_ctx, pi);
-      process.exit(0);
-    },
-  });
+  registerExitCommand(pi);
 
   // ── /kill — immediate exit (bypass cleanup) ─────────────────────────────
   pi.registerCommand("kill", {
     description: "Exit GSD immediately (no cleanup)",
-    handler: async (_ctx) => {
+    handler: async (_args: string, _ctx: ExtensionCommandContext) => {
       process.exit(0);
     },
   });
@@ -113,7 +127,7 @@ export default function (pi: ExtensionAPI) {
         ...params,
         timeout: params.timeout ?? DEFAULT_BASH_TIMEOUT_SECS,
       };
-      return baseBash.execute(toolCallId, paramsWithTimeout, signal, onUpdate, ctx);
+      return (baseBash as any).execute(toolCallId, paramsWithTimeout, signal, onUpdate, ctx);
     },
   };
   pi.registerTool(dynamicBash as any);
@@ -134,7 +148,7 @@ export default function (pi: ExtensionAPI) {
       ctx?: any,
     ) => {
       const fresh = createWriteTool(process.cwd());
-      return fresh.execute(toolCallId, params, signal, onUpdate, ctx);
+      return (fresh as any).execute(toolCallId, params, signal, onUpdate, ctx);
     },
   };
   pi.registerTool(dynamicWrite as any);
@@ -150,7 +164,7 @@ export default function (pi: ExtensionAPI) {
       ctx?: any,
     ) => {
       const fresh = createReadTool(process.cwd());
-      return fresh.execute(toolCallId, params, signal, onUpdate, ctx);
+      return (fresh as any).execute(toolCallId, params, signal, onUpdate, ctx);
     },
   };
   pi.registerTool(dynamicRead as any);
@@ -166,7 +180,7 @@ export default function (pi: ExtensionAPI) {
       ctx?: any,
     ) => {
       const fresh = createEditTool(process.cwd());
-      return fresh.execute(toolCallId, params, signal, onUpdate, ctx);
+      return (fresh as any).execute(toolCallId, params, signal, onUpdate, ctx);
     },
   };
   pi.registerTool(dynamicEdit as any);
@@ -286,19 +300,8 @@ export default function (pi: ExtensionAPI) {
       ].join("\n");
     }
 
-    // Inject recall block for non-auto sessions (auto-mode handles its own recall)
-    let recallBlock = "";
-    if (!isStatusAutoActive()) {
-      try {
-        const recall = await buildRecallBlock({ cwd: process.cwd() });
-        if (recall) recallBlock = `\n\n${recall}`;
-      } catch {
-        // Non-throwing — recall failures must not block session start
-      }
-    }
-
     return {
-      systemPrompt: `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${newSkillsBlock}${worktreeBlock}${recallBlock}`,
+      systemPrompt: `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${newSkillsBlock}${worktreeBlock}`,
       ...(injection
         ? {
           message: {
@@ -314,28 +317,29 @@ export default function (pi: ExtensionAPI) {
   // ── agent_end: auto-mode advancement or auto-start after discuss ───────────
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
     // If discuss phase just finished, start auto-mode
-    if (checkAutoStartAfterDiscuss()) return;
-
-    // If quick mode just finished, capture corrections and reset
-    if (getGSDMode() === "quick") {
-      await checkQuickEnd(ctx, pi);
-      return;
-    }
-
-    // If chat mode just finished, capture corrections and reset
-    if (getGSDMode() === "chat") {
-      await checkChatEnd(ctx, pi);
+    if (checkAutoStartAfterDiscuss()) {
+      depthVerificationDone = false;
       return;
     }
 
     // If auto-mode is already running, advance to next unit
     if (!isAutoActive()) return;
 
-    // If the agent was aborted (user pressed Escape), pause auto-mode
-    // instead of advancing. This preserves the conversation so the user
-    // can inspect what happened, interact with the agent, or resume.
+    // If the agent was aborted (user pressed Escape) or hit a provider
+    // error (fetch failure, rate limit, etc.), pause auto-mode instead of
+    // advancing. This preserves the conversation so the user can inspect
+    // what happened, interact with the agent, or resume.
     const lastMsg = event.messages[event.messages.length - 1];
     if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+      await pauseAuto(ctx, pi);
+      return;
+    }
+    if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "error") {
+      const errorDetail =
+        "errorMessage" in lastMsg && lastMsg.errorMessage
+          ? `: ${lastMsg.errorMessage}`
+          : "";
+      (ctx as any).log(`Auto-mode paused due to provider error${errorDetail}`);
       await pauseAuto(ctx, pi);
       return;
     }
@@ -399,6 +403,80 @@ export default function (pi: ExtensionAPI) {
     if (dash.currentUnit) {
       saveActivityLog(ctx, dash.basePath, dash.currentUnit.type, dash.currentUnit.id);
     }
+  });
+
+  // ── tool_call: block CONTEXT.md writes during discussion without depth verification ──
+  pi.on("tool_call", async (event) => {
+    if (!isToolCallEventType("write", event)) return;
+    const result = shouldBlockContextWrite(
+      event.toolName,
+      event.input.path,
+      getDiscussionMilestoneId(),
+      isDepthVerified(),
+    );
+    if (result.block) return result;
+  });
+
+  // ── tool_result: persist discussion exchanges & detect depth gate ──────
+  pi.on("tool_result", async (event) => {
+    if (event.toolName !== "ask_user_questions") return;
+
+    const milestoneId = getDiscussionMilestoneId();
+    if (!milestoneId) return;
+
+    const details = event.details as any;
+    if (details?.cancelled || !details?.response) return;
+
+    // ── Depth gate detection ──────────────────────────────────────────
+    const questions: any[] = (event.input as any)?.questions ?? [];
+    for (const q of questions) {
+      if (typeof q.id === "string" && q.id.includes("depth_verification")) {
+        depthVerificationDone = true;
+        break;
+      }
+    }
+
+    // ── Persist exchange to DISCUSSION.md ──────────────────────────────
+    const basePath = process.cwd();
+    const milestoneDir = resolveMilestonePath(basePath, milestoneId);
+    if (!milestoneDir) return;
+
+    const fileName = buildMilestoneFileName(milestoneId, "DISCUSSION");
+    const discussionPath = join(milestoneDir, fileName);
+    const timestamp = new Date().toISOString();
+
+    // Format exchange as markdown
+    const lines: string[] = [`## Exchange — ${timestamp}`, ""];
+
+    for (const q of questions) {
+      lines.push(`### ${q.header ?? "Question"}`);
+      lines.push("");
+      lines.push(q.question ?? "");
+      if (Array.isArray(q.options)) {
+        lines.push("");
+        for (const opt of q.options) {
+          lines.push(`- **${opt.label}** — ${opt.description ?? ""}`);
+        }
+      }
+
+      // Append user response for this question
+      const answer = details.response?.answers?.[q.id];
+      if (answer) {
+        lines.push("");
+        const selected = Array.isArray(answer.selected) ? answer.selected.join(", ") : answer.selected;
+        lines.push(`**Selected:** ${selected}`);
+        if (answer.notes) {
+          lines.push(`**Notes:** ${answer.notes}`);
+        }
+      }
+      lines.push("");
+    }
+
+    lines.push("---", "");
+
+    const newBlock = lines.join("\n");
+    const existing = await loadFile(discussionPath) ?? `# ${milestoneId} Discussion Log\n\n`;
+    await saveFile(discussionPath, existing + newBlock);
   });
 }
 

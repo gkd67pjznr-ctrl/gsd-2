@@ -65,8 +65,6 @@ export interface AutoSupervisorConfig {
   hard_timeout_minutes?: number;
 }
 
-export type QualityLevelPref = "fast" | "standard" | "strict";
-
 export interface RemoteQuestionsConfig {
   channel: "slack" | "discord";
   channel_id: string | number;
@@ -86,8 +84,6 @@ export interface GSDPreferences {
   auto_supervisor?: AutoSupervisorConfig;
   uat_dispatch?: boolean;
   budget_ceiling?: number;
-  correction_capture?: boolean;
-  quality_level?: QualityLevelPref;
   remote_questions?: RemoteQuestionsConfig;
   git?: GitPreferences;
 }
@@ -577,8 +573,6 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     auto_supervisor: { ...(base.auto_supervisor ?? {}), ...(override.auto_supervisor ?? {}) },
     uat_dispatch: override.uat_dispatch ?? base.uat_dispatch,
     budget_ceiling: override.budget_ceiling ?? base.budget_ceiling,
-    correction_capture: override.correction_capture ?? base.correction_capture,
-    quality_level: override.quality_level ?? base.quality_level,
     remote_questions: override.remote_questions
       ? { ...(base.remote_questions ?? {}), ...override.remote_questions }
       : base.remote_questions,
@@ -631,7 +625,7 @@ function validatePreferences(preferences: GSDPreferences): {
       }
       const validatedRule: GSDSkillRule = { when };
       for (const action of SKILL_ACTIONS) {
-        const values = normalizeStringList((rule as Record<string, unknown>)[action]);
+        const values = normalizeStringList((rule as unknown as Record<string, unknown>)[action]);
         if (values.length > 0) {
           validatedRule[action as keyof GSDSkillRule] = values as never;
         }
@@ -655,15 +649,6 @@ function validatePreferences(preferences: GSDPreferences): {
 
   if (preferences.uat_dispatch !== undefined) {
     validated.uat_dispatch = !!preferences.uat_dispatch;
-  }
-
-  const validQualityLevels = new Set(["fast", "standard", "strict"]);
-  if (preferences.quality_level) {
-    if (validQualityLevels.has(preferences.quality_level)) {
-      validated.quality_level = preferences.quality_level;
-    } else {
-      errors.push(`invalid quality_level value: ${preferences.quality_level}`);
-    }
   }
 
   if (preferences.budget_ceiling !== undefined) {
@@ -715,6 +700,14 @@ function validatePreferences(preferences: GSDPreferences): {
         git.commit_type = g.commit_type;
       } else {
         errors.push(`git.commit_type must be one of: feat, fix, refactor, docs, test, chore, perf, ci, build, style`);
+      }
+    }
+    if (g.merge_strategy !== undefined) {
+      const validStrategies = new Set(["squash", "merge"]);
+      if (typeof g.merge_strategy === "string" && validStrategies.has(g.merge_strategy)) {
+        git.merge_strategy = g.merge_strategy as "squash" | "merge";
+      } else {
+        errors.push("git.merge_strategy must be one of: squash, merge");
       }
     }
     if (g.main_branch !== undefined) {

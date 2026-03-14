@@ -1,7 +1,7 @@
 import { spawnSync } from "child_process";
 
-import { clipboard } from "./clipboard-native.js";
-import { loadPhoton } from "./photon.js";
+import { readImageFromClipboard as nativeReadImage } from "@gsd/native/clipboard";
+import { ImageFormat, parseImage } from "@gsd/native/image";
 
 export type ClipboardImage = {
 	bytes: Uint8Array;
@@ -60,22 +60,14 @@ function isSupportedImageMimeType(mimeType: string): boolean {
 }
 
 /**
- * Convert unsupported image formats to PNG using Photon.
- * Returns null if conversion is unavailable or fails.
+ * Convert unsupported image formats to PNG using the native Rust image module.
+ * Returns null if conversion fails.
  */
 async function convertToPng(bytes: Uint8Array): Promise<Uint8Array | null> {
-	const photon = await loadPhoton();
-	if (!photon) {
-		return null;
-	}
-
 	try {
-		const image = photon.PhotonImage.new_from_byteslice(bytes);
-		try {
-			return image.get_bytes();
-		} finally {
-			image.free();
-		}
+		const image = await parseImage(bytes);
+		const pngBytes = await image.encode(ImageFormat.PNG, 100);
+		return new Uint8Array(pngBytes);
 	} catch {
 		return null;
 	}
@@ -175,19 +167,20 @@ export async function readClipboardImage(options?: {
 	let image: ClipboardImage | null = null;
 
 	if (platform === "linux" && isWaylandSession(env)) {
+		// Wayland: use CLI tools (wl-paste/xclip) since native arboard
+		// may not have access to the Wayland compositor from a terminal.
 		image = readClipboardImageViaWlPaste() ?? readClipboardImageViaXclip();
 	} else {
-		if (!clipboard || !clipboard.hasImage()) {
+		// macOS, Windows, Linux X11: use native Rust clipboard (arboard)
+		try {
+			const nativeImage = await nativeReadImage();
+			if (!nativeImage || nativeImage.data.length === 0) {
+				return null;
+			}
+			image = { bytes: nativeImage.data, mimeType: nativeImage.mimeType };
+		} catch {
 			return null;
 		}
-
-		const imageData = await clipboard.getImageBinary();
-		if (!imageData || imageData.length === 0) {
-			return null;
-		}
-
-		const bytes = imageData instanceof Uint8Array ? imageData : Uint8Array.from(imageData);
-		image = { bytes, mimeType: "image/png" };
 	}
 
 	if (!image) {

@@ -17,6 +17,7 @@ import { ensureManagedTools } from './tool-bootstrap.js'
 import { loadStoredEnvKeys } from './wizard.js'
 import { getPiDefaultModelAndProvider, migratePiCredentials } from './pi-migration.js'
 import { shouldRunOnboarding, runOnboarding } from './onboarding.js'
+import { checkForUpdates } from './update-check.js'
 
 // ---------------------------------------------------------------------------
 // Minimal CLI arg parser — detects print/subagent mode flags
@@ -73,6 +74,7 @@ function parseCliArgs(argv: string[]): CliFlags {
       process.stdout.write('  --help, -h               Print this help and exit\n')
       process.stdout.write('\nSubcommands:\n')
       process.stdout.write('  config                   Re-run the setup wizard\n')
+      process.stdout.write('  update                   Update GSD to the latest version\n')
       process.exit(0)
     } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
       flags.messages.push(arg)
@@ -91,6 +93,13 @@ if (cliFlags.messages[0] === 'config') {
   process.exit(0)
 }
 
+// `gsd update` — update to the latest version via npm
+if (cliFlags.messages[0] === 'update') {
+  const { runUpdate } = await import('./update-cmd.js')
+  await runUpdate()
+  process.exit(0)
+}
+
 // Pi's tool bootstrap can mis-detect already-installed fd/rg on some systems
 // because spawnSync(..., ["--version"]) returns EPERM despite a zero exit code.
 // Provision local managed binaries first so Pi sees them without probing PATH.
@@ -103,6 +112,11 @@ migratePiCredentials(authStorage)
 // Run onboarding wizard on first launch (no LLM provider configured)
 if (!isPrintMode && shouldRunOnboarding(authStorage)) {
   await runOnboarding(authStorage)
+}
+
+// Non-blocking update check — runs at most once per 24h, fire-and-forget
+if (!isPrintMode) {
+  checkForUpdates().catch(() => {})
 }
 
 const modelRegistry = new ModelRegistry(authStorage)

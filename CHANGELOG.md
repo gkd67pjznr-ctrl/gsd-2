@@ -6,6 +6,185 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.10.8] - 2026-03-14
+
+### Fixed
+- Publish verification checks `dist/loader.js` is non-empty (`-s`) and uses `--ignore-scripts` on `npm pack --dry-run` to match actual publish behaviour (#298)
+
+## [2.10.7] - 2026-03-14
+
+### Added
+- GitHub Workflows skill with CI workflow template and `ci_monitor` tool (#294)
+- Auto-resolve merge conflicts via LLM-powered fix-merge session
+- Auto-update integration branch when user starts auto-mode from a different branch (#300)
+
+### Changed
+- Secrets manifest is re-checked before every dispatch, not just at auto mode start
+- Replaced TS parameter properties with explicit fields for Node strip-types compatibility
+- Hardened CI publish pipeline to prevent broken releases (#304)
+
+### Fixed
+- Unresolvable artifact paths now correctly treated as stale completion state, preventing OOM crashes (#313)
+- Eliminated branch checkout during slice merge that caused STATE.md conflicts (#307)
+- Removed infinite delivery retry loop for background job completions (#301)
+- Display ⌥ instead of Alt for keybindings on macOS (#299)
+
+### Removed
+- Deprecated legacy dead code from OAuth module
+
+## [2.10.6] - 2026-03-13
+
+### Added
+- Native Rust output truncation module for efficient large-output handling (#268)
+- Native Rust xxHash32 hasher for hashline IDs — faster line hashing (#272)
+- Native Rust bash stream processor for single-pass chunk processing (#271)
+- Memory extraction pipeline (#261)
+- `claude-opus-4-6` model with 1M context window (#288)
+
+### Fixed
+- Oversized TUI lines now truncated instead of crashing (#287)
+- Anthropic rate limit backoff now respects server-requested retry delay
+- CI publish guard: skip main package publish if already on npm
+
+## [2.10.5] - 2026-03-13
+
+### Fixed
+- `optionalDependencies` in published `gsd-pi@2.10.4` were still pinned to `2.10.2`, causing users to install the broken engine binaries that 2.10.4 was meant to fix (#276)
+
+## [2.10.4] - 2026-03-13
+
+### Fixed
+- Native binary distribution — `.node` binaries were missing from the npm tarball, causing startup crashes on all platforms since v2.10.0
+- Native loader resolution chain: tries `@gsd-build/engine-{platform}` npm package first, then local dev build, with clear error messages listing supported platforms
+
+### Added
+- Per-platform optional dependency packages (`@gsd-build/engine-*`) for macOS (ARM64/x64), Linux (x64/ARM64), and Windows (x64)
+- Cross-platform native binary CI build and publish workflow
+- Version synchronization script for lock-step platform package releases
+
+## [2.10.2] - 2026-03-13
+
+### Added
+- Native Rust TTSR regex engine — pre-compiles all stream rule conditions into a single `RegexSet` for one-pass DFA matching instead of O(rules × conditions) JS regex iteration
+- Native Rust diff engine — fuzzy text matching (`fuzzyFindText`, `normalizeForFuzzyMatch`) and unified diff generation (`generateDiff`) via the `similar` crate, replacing the `diff` npm package
+- Native Rust GSD file parser — frontmatter parsing, section extraction, batch `.gsd/` directory parsing, and structured roadmap parsing with transparent JS fallback
+
+## [2.10.1] - 2026-03-13
+
+### Fixed
+- `@gsd/native` package ships pre-compiled JavaScript instead of raw TypeScript, fixing startup crashes on Node.js 20, 22, and 24 (#248)
+
+## [2.10.0] - 2026-03-13
+
+### Added
+- Native Rust engine with high-performance N-API modules replacing JS/WASM dependencies:
+  - **grep** — ripgrep-backed content and filesystem search
+  - **glob** — gitignore-aware file discovery with scan caching
+  - **ps** — cross-platform process tree management
+  - **clipboard** — native clipboard access via arboard (text + image)
+  - **highlight** — syntect-based syntax highlighting (replaces `cli-highlight`)
+  - **ast** — structural code search and rewrite via ast-grep (38+ languages)
+  - **html** — HTML-to-Markdown conversion
+  - **text** — ANSI-aware text measurement, wrapping, truncation, and slicing
+  - **fd** — fuzzy file path discovery for autocomplete
+  - **image** — decode, encode, and resize images (PNG, JPEG, GIF, WebP)
+- Background shell `env` action to query shell session environment state
+- Background shell `run` action for blocking command execution on persistent sessions
+- Background shell `session` process type for persistent interactive sessions
+- Hashline edits — line-hash-anchored file editing
+- Universal config discovery extension
+
+### Changed
+- Find tool uses native Rust glob instead of `fd` CLI binary
+- Syntax highlighting uses native syntect instead of `cli-highlight` npm package
+- Autocomplete uses native fd module instead of `fd` CLI subprocess
+- Text utilities (visible width, wrapping, truncation, slicing) use native Rust instead of JS
+- Clipboard operations use native arboard instead of platform-specific CLI tools
+- Image processing uses native Rust `image` crate instead of Photon WASM
+
+### Fixed
+- Prevent move operation from silently overwriting existing files
+- Separate access/unlink error handling in delete path
+- Untrack runtime files from slice branch before squash-merge
+- Copy LSP defaults.json to dist during build
+- Native module test assertions
+
+## [2.9.0] - 2026-03-13
+
+### Added
+- LSP tool — full Language Server Protocol integration with diagnostics, go-to-definition, references, hover, document/workspace symbols, rename, code actions, type definition, and implementation support
+- `/thinking` slash command for toggling thinking level during sessions
+- Interactive wizard mode for `/gsd prefs` with guided configuration
+- Startup update check with 24-hour cache — notifies when a new version is available
+
+### Fixed
+- TypeScript type errors across gsd, browser-tools, search-the-web, and misc extension files
+- Milestone ID generation uses max-based approach instead of length+1 (prevents ID collisions)
+- Non-thinking models handled correctly in `/thinking` command
+- Auto-mode pauses on provider errors to prevent reassess-roadmap loop
+- TAB hint displayed for notes input in discuss-mode survey
+- Slice branches merge to integration branch instead of main
+- Prefs wizard audit findings addressed
+- Deduplicated maxNum logic with test coverage
+- Command injection eliminated in LSP config `which()` function
+- Unhandled JSON.parse in LSP message reader wrapped with error handling
+
+## [2.8.3] - 2026-03-13
+
+### Fixed
+- `ask_user_questions` handles undefined `custom()` result in RPC mode
+- Provider-aware model resolution for per-phase preferences (respects `provider` field instead of parsing model name prefixes)
+- Execute-task artifact verification aligned with `deriveState` — adds self-repair for missing artifacts
+- Research phase infinite loop broken; state synced on stop
+- Auto-resolve merge conflicts on `.gsd/` runtime files
+- Auto-switch model after `/login` and `/logout` to prevent API key errors
+- Anthropic provider detection uses `provider` field instead of model name prefix matching
+
+## [2.8.2] - 2026-03-13
+
+### Fixed
+- Path operations use `node:path` stdlib instead of hardcoded forward slashes, fixing cross-platform compatibility
+- Prompts use relative paths to prevent Windows drive letter mangling
+- Runtime files already in the git index are untracked to prevent merge conflicts
+- HTTP_PROXY and HTTPS_PROXY environment variables respected for all outbound requests
+- Windows NUL redirects sanitized to /dev/null in Git Bash environments
+
+### Changed
+- `.claude/` and `.gsd/` directories untracked from repo, `*.tgz` gitignored
+
+## [2.8.1] - 2026-03-13
+
+### Added
+- Discussion depth verification and context write-gate for richer milestone discussions
+- TTSR + blob/artifact storage (ported from oh-my-pi)
+- Skip/discard escape hatches in no-roadmap wizard
+- Configurable `merge_strategy` preference for slice completion
+
+### Fixed
+- `fsevents` bumped to ~2.3.3 for Node 25 compatibility; added as optional dep for Linux installs
+- Observability warnings injected into agent prompt for enforcement
+- Auto-detect headless environment for Playwright browser launch
+- UAT artifact verified before marking complete-slice done
+- Prior slices must complete on main before next slice dispatches
+- smartStage fallback bypasses runtime exclusions when `.gsd/` is gitignored
+- `/exit` uses graceful shutdown instead of hard kill
+
+## [2.8.0] - 2026-03-13
+
+### Added
+- Browser tools: `browser_analyze_form` and `browser_fill_form` — form field inventory and intelligent filling by label/name/placeholder
+- Browser tools: `browser_find_best` — scored element candidates for semantic intents
+- Browser tools: `browser_act` — execute common browser micro-tasks in one call
+- Browser tools: 108 unit and integration tests covering all new components
+
+### Changed
+- Browser tools: decomposed 5000-line monolithic `index.ts` into focused modules (state, capture, settle, lifecycle, refs, utils) with 11 categorized tool files
+- Browser tools: consolidated state capture reduces evaluate round-trips per action
+- Browser tools: zero-mutation settle short-circuit for faster page interaction
+- Browser tools: conditional body text capture — low-signal tools skip it for smaller token payloads
+- Browser tools: screenshot resizing uses `sharp` instead of canvas evaluate calls
+- Browser tools: screenshots opt-in on navigate (no longer sent by default)
+
 ## [2.7.1] - 2026-03-13
 
 ### Added
@@ -279,7 +458,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.7.1...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.10.8...HEAD
+[2.10.8]: https://github.com/gsd-build/gsd-2/compare/v2.10.7...v2.10.8
+[2.10.7]: https://github.com/gsd-build/gsd-2/compare/v2.10.6...v2.10.7
+[2.10.6]: https://github.com/gsd-build/gsd-2/compare/v2.10.5...v2.10.6
+[2.10.5]: https://github.com/gsd-build/gsd-2/compare/v2.10.4...v2.10.5
+[2.10.4]: https://github.com/gsd-build/gsd-2/compare/v2.10.2...v2.10.4
+[2.10.2]: https://github.com/gsd-build/gsd-2/compare/v2.10.1...v2.10.2
+[2.10.1]: https://github.com/gsd-build/gsd-2/compare/v2.10.0...v2.10.1
+[2.10.0]: https://github.com/gsd-build/gsd-2/compare/v2.9.0...v2.10.0
+[2.9.0]: https://github.com/gsd-build/gsd-2/compare/v2.8.3...v2.9.0
+[2.8.3]: https://github.com/gsd-build/gsd-2/compare/v2.8.2...v2.8.3
+[2.8.2]: https://github.com/gsd-build/gsd-2/compare/v2.8.1...v2.8.2
+[2.8.1]: https://github.com/gsd-build/gsd-2/compare/v2.8.0...v2.8.1
+[2.8.0]: https://github.com/gsd-build/gsd-2/compare/v2.7.1...v2.8.0
 [2.7.1]: https://github.com/gsd-build/gsd-2/compare/v2.7.0...v2.7.1
 [2.7.0]: https://github.com/gsd-build/gsd-2/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/gsd-build/gsd-2/compare/v2.5.1...v2.6.0

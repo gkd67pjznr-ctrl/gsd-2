@@ -48,47 +48,33 @@ import {
   validateCompleteBoundary,
   formatValidationIssues,
 } from "./observability-validator.js";
-import { ensureGitignore } from "./gitignore.js";
+import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
 import { runGSDDoctor, rebuildState } from "./doctor.js";
 import { snapshotSkills, clearSkillSnapshot } from "./skill-discovery.js";
 import {
   initMetrics, resetMetrics, snapshotUnitMetrics, getLedger,
   getProjectTotals, formatCost, formatTokenCount,
 } from "./metrics.js";
-import { join } from "node:path";
-import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import {
   autoCommitCurrentBranch,
+  captureIntegrationBranch,
   ensureSliceBranch,
   getCurrentBranch,
   getMainBranch,
+  MergeConflictError,
   parseSliceBranch,
+  setActiveMilestoneId,
   switchToMain,
   mergeSliceToMain,
 } from "./worktree.ts";
-import { GitServiceImpl } from "./git-service.ts";
+import { GitServiceImpl, runGit } from "./git-service.ts";
+import { getPriorSliceCompletionBlocker } from "./dispatch-guard.ts";
 import type { GitPreferences } from "./git-service.ts";
 import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { makeUI, GLYPH, INDENT } from "../shared/ui.js";
-import { detectCorrections } from "./correction-detector.ts";
-import { buildRecallBlock } from "./recall.js";
-import type { SessionEntry as DetectorSessionEntry } from "./correction-detector.ts";
-import { writeCorrection } from "./corrections.ts";
-import type { CorrectionEntry } from "./correction-types.ts";
-import { createEmbeddingProvider } from "./embedding.js";
-import type { EmbeddingProvider } from "./embedding.js";
-import { VectorIndex } from "./vector-index.js";
-import { checkAndPromote } from "./pattern-preferences.ts";
-import { analyzePatterns } from "./observer.ts";
-import { diffPlanVsSummary } from "./passive-monitor.ts";
-import {
-  resolveQualityLevel,
-  buildQualityInstructions,
-  getGateEvents,
-  clearGateEvents,
-} from "./quality-gating.ts";
-import { setGSDStatus } from "./status.js";
 import { showNextAction } from "../shared/next-action-ui.js";
 
 // ─── Disk-backed completed-unit helpers ───────────────────────────────────────
@@ -169,98 +155,11 @@ let currentMilestoneId: string | null = null;
 
 /** Model the user had selected before auto-mode started */
 let originalModelId: string | null = null;
+let originalModelProvider: string | null = null;
 
 /** Progress-aware timeout supervision */
 let unitTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 let wrapupWarningHandle: ReturnType<typeof setTimeout> | null = null;
-
-// ─── Embedding Singletons ─────────────────────────────────────────────────────
-
-let _embeddingSingletons: Promise<{ provider: EmbeddingProvider | null; index: VectorIndex | null }> | null = null;
-
-function getEmbeddingSingletons(): Promise<{ provider: EmbeddingProvider | null; index: VectorIndex | null }> {
-  if (!_embeddingSingletons) {
-    _embeddingSingletons = (async () => {
-      const providerName = process.env.GSD_EMBEDDING_PROVIDER as 'openai' | 'ollama' | undefined;
-      const model = process.env.GSD_EMBEDDING_MODEL;
-      if (!providerName || !model) return { provider: null, index: null };
-      const provider = createEmbeddingProvider({
-        provider: providerName,
-        model,
-        apiKey: process.env.GSD_EMBEDDING_API_KEY,
-      });
-      if (!provider) return { provider: null, index: null };
-      const indexPath = join(basePath, '.gsd', 'patterns', 'vectors');
-      const index = new VectorIndex(indexPath);
-      await index.initialize();
-      return { provider, index };
-    })();
-  }
-  return _embeddingSingletons;
-}
-
-// ─── Embedding Cost Accumulator ───────────────────────────────────────────────
-
-let _embeddingCostAccumulator = 0;
-let _embeddingTokenAccumulator = 0;
-
-/** Add embedding cost data to the running accumulator. */
-export function _addEmbeddingCost(cost: number, tokens: number): void {
-  _embeddingCostAccumulator += cost;
-  _embeddingTokenAccumulator += tokens;
-}
-
-/** Return accumulated costs and reset to zero. */
-export function flushEmbeddingCosts(): { cost: number; tokens: number } {
-  const snapshot = { cost: _embeddingCostAccumulator, tokens: _embeddingTokenAccumulator };
-  _embeddingCostAccumulator = 0;
-  _embeddingTokenAccumulator = 0;
-  return snapshot;
-}
-
-/** Inspect accumulated costs without resetting (for tests). */
-export function _getEmbeddingCostSnapshot(): { cost: number; tokens: number } {
-  return { cost: _embeddingCostAccumulator, tokens: _embeddingTokenAccumulator };
-}
-
-/** Promise chain to serialize concurrent embeddings (Vectra is not concurrency-safe). */
-let _embedChain: Promise<void> = Promise.resolve();
-
-/** Get the current embed chain promise (for testing serialization). */
-export function _getEmbedChain(): Promise<void> { return _embedChain; }
-
-/** Reset embedding singletons (for testing only). */
-export function _resetEmbeddingSingletons(): void {
-  _embeddingSingletons = null;
-  _embedChain = Promise.resolve();
-}
-
-/**
- * Fire-and-forget async embedding of a correction entry.
- * Never throws. Respects kill switch. Serialized via promise chain.
- */
-export function embedCorrection(entry: CorrectionEntry): void {
-  try {
-    const prefs = loadEffectiveGSDPreferences()?.preferences;
-    if (prefs?.correction_capture === false) return;
-  } catch {
-    return;
-  }
-  _embedChain = _embedChain.then(async () => {
-    try {
-      const { provider, index } = await getEmbeddingSingletons();
-      if (!provider || !index) return;
-      const result = await provider.embed(entry.correction_to);
-      if (result.cost != null && result.tokensUsed != null) {
-        _addEmbeddingCost(result.cost, result.tokensUsed);
-      }
-      if (!result.vector) return;
-      await index.addCorrection(entry, result.vector);
-    } catch {
-      // Swallowed — embedding failures must never block dispatch (D040)
-    }
-  });
-}
 let idleWatchdogHandle: ReturnType<typeof setInterval> | null = null;
 
 /** Format token counts for compact display */
@@ -362,6 +261,11 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
     ctx?.ui.notify("Auto-mode stopped.", "info");
   }
 
+  // Sync disk state so next resume starts from accurate state
+  if (basePath) {
+    try { await rebuildState(basePath); } catch { /* non-fatal */ }
+  }
+
   resetMetrics();
   active = false;
   paused = false;
@@ -372,15 +276,16 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   currentMilestoneId = null;
   cachedSliceProgress = null;
   pendingCrashRecovery = null;
-  if (ctx) setGSDStatus(ctx, "idle");
+  ctx?.ui.setStatus("gsd-auto", undefined);
   ctx?.ui.setWidget("gsd-progress", undefined);
   ctx?.ui.setFooter(undefined);
 
   // Restore the user's original model
-  if (pi && ctx && originalModelId) {
-    const original = ctx.modelRegistry.find("anthropic", originalModelId);
+  if (pi && ctx && originalModelId && originalModelProvider) {
+    const original = ctx.modelRegistry.find(originalModelProvider, originalModelId);
     if (original) await pi.setModel(original);
     originalModelId = null;
+    originalModelProvider = null;
   }
 
   cmdCtx = null;
@@ -400,7 +305,7 @@ export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Pro
   // Preserve: unitDispatchCount, currentUnit, basePath, verbose, cmdCtx,
   // completedUnits, autoStartTime, currentMilestoneId, originalModelId
   // — all needed for resume and dashboard display
-  if (ctx) setGSDStatus(ctx, "idle");
+  ctx?.ui.setStatus("gsd-auto", "paused");
   ctx?.ui.setWidget("gsd-progress", undefined);
   ctx?.ui.setFooter(undefined);
   const resumeCmd = stepMode ? "/gsd next" : "/gsd auto";
@@ -459,7 +364,8 @@ export async function startAuto(
     unitDispatchCount.clear();
     // Re-initialize metrics in case ledger was lost during pause
     if (!getLedger()) initMetrics(base);
-    setGSDStatus(ctx, "auto");
+    // Ensure milestone ID is set on git service for integration branch resolution
+    if (currentMilestoneId) setActiveMilestoneId(base, currentMilestoneId);
     ctx.ui.setStatus("gsd-auto", stepMode ? "next" : "auto");
     ctx.ui.setFooter(hideFooter);
     ctx.ui.notify(stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "info");
@@ -487,6 +393,7 @@ export async function startAuto(
 
   // Ensure .gitignore has baseline patterns
   ensureGitignore(base);
+  untrackRuntimeFiles(base);
 
   // Bootstrap .gsd/ if it doesn't exist
   const gsdDir = join(base, ".gsd");
@@ -564,6 +471,16 @@ export async function startAuto(
   currentUnit = null;
   currentMilestoneId = state.activeMilestone?.id ?? null;
   originalModelId = ctx.model?.id ?? null;
+  originalModelProvider = ctx.model?.provider ?? null;
+
+  // Capture the integration branch — records the branch the user was on when
+  // auto-mode started. Slice branches will merge back to this branch instead
+  // of the repo's default (main/master). Idempotent when the branch is the
+  // same; updates the record when started from a different branch (#300).
+  if (currentMilestoneId) {
+    captureIntegrationBranch(base, currentMilestoneId);
+    setActiveMilestoneId(base, currentMilestoneId);
+  }
 
   // Initialize metrics — loads existing ledger from disk
   initMetrics(base);
@@ -573,7 +490,6 @@ export async function startAuto(
     snapshotSkills();
   }
 
-  setGSDStatus(ctx, "auto");
   ctx.ui.setStatus("gsd-auto", stepMode ? "next" : "auto");
   ctx.ui.setFooter(hideFooter);
   const modeLabel = stepMode ? "Step-mode" : "Auto-mode";
@@ -781,6 +697,7 @@ function unitVerb(unitType: string): string {
     case "replan-slice": return "replanning";
     case "reassess-roadmap": return "reassessing";
     case "run-uat": return "running UAT";
+    case "fix-merge": return "resolving conflicts";
     default: return unitType;
   }
 }
@@ -796,6 +713,7 @@ function unitPhaseLabel(unitType: string): string {
     case "replan-slice": return "REPLAN";
     case "reassess-roadmap": return "REASSESS";
     case "run-uat": return "UAT";
+    case "fix-merge": return "MERGE-FIX";
     default: return unitType.toUpperCase();
   }
 }
@@ -812,6 +730,7 @@ function peekNext(unitType: string, state: GSDState): string {
     case "replan-slice": return `re-execute ${sid}`;
     case "reassess-roadmap": return "advance to next slice";
     case "run-uat": return "reassess roadmap";
+    case "fix-merge": return "continue merge";
     default: return "";
   }
 }
@@ -992,7 +911,7 @@ function updateProgressWidget(
 
         const hintParts: string[] = [];
         hintParts.push("esc pause");
-        hintParts.push("Ctrl+Alt+G dashboard");
+        hintParts.push(process.platform === "darwin" ? "⌃⌥G dashboard" : "Ctrl+Alt+G dashboard");
         lines.push(...ui.hints(hintParts));
 
         lines.push(...ui.bar());
@@ -1100,8 +1019,13 @@ async function dispatchNextUnit(
     // Reset stuck detection for new milestone
     unitDispatchCount.clear();
     unitRecoveryCount.clear();
+    // Capture integration branch for the new milestone and update git service
+    captureIntegrationBranch(basePath, mid);
   }
-  if (mid) currentMilestoneId = mid;
+  if (mid) {
+    currentMilestoneId = mid;
+    setActiveMilestoneId(basePath, mid);
+  }
 
   if (!mid) {
     // Save final session before stopping
@@ -1112,6 +1036,68 @@ async function dispatchNextUnit(
     }
     await stopAuto(ctx, pi);
     return;
+  }
+
+  // Guard: mid/midTitle must be defined strings from this point onward.
+  // The !mid check above returns early if mid is falsy; midTitle comes from
+  // the same object so it should always be present when mid is.
+  if (!midTitle) {
+    await stopAuto(ctx, pi);
+    return;
+  }
+
+  // ── Mid-merge safety check: detect leftover state from a prior fix-merge session ──
+  // If MERGE_HEAD or SQUASH_MSG exists, a fix-merge session ran previously.
+  // Check whether it succeeded (no unmerged entries → finalize) or failed (still conflicted → reset + stop).
+  {
+    const mergeHeadPath = join(basePath, ".git", "MERGE_HEAD");
+    const squashMsgPath = join(basePath, ".git", "SQUASH_MSG");
+    const hasMergeHead = existsSync(mergeHeadPath);
+    const hasSquashMsg = existsSync(squashMsgPath);
+    if (hasMergeHead || hasSquashMsg) {
+      const unmerged = runGit(basePath, ["diff", "--name-only", "--diff-filter=U"], { allowFailure: true });
+      if (!unmerged || !unmerged.trim()) {
+        // fix-merge succeeded — finalize the commit if needed (squash or normal merge)
+        if (hasMergeHead || hasSquashMsg) {
+          try {
+            runGit(basePath, ["commit", "--no-edit"], { allowFailure: false });
+            const mode = hasMergeHead ? "merge" : "squash commit";
+            ctx.ui.notify(`Fix-merge session succeeded — finalized ${mode}.`, "info");
+          } catch {
+            // Commit may already exist; non-fatal
+          }
+        }
+        // Re-derive state from the now-merged working tree
+        state = await deriveState(basePath);
+        mid = state.activeMilestone?.id;
+        midTitle = state.activeMilestone?.title;
+      } else {
+        // fix-merge failed — still has unresolved conflicts, abort merge/squash, reset and stop
+        if (hasMergeHead) {
+          // Properly abort an in-progress merge so MERGE_HEAD and related metadata are cleared
+          runGit(basePath, ["merge", "--abort"], { allowFailure: true });
+        } else if (hasSquashMsg) {
+          // Squash-in-progress without MERGE_HEAD: remove stale squash metadata
+          try {
+            unlinkSync(squashMsgPath);
+          } catch {
+            // Best-effort cleanup; ignore failures
+          }
+        }
+        runGit(basePath, ["reset", "--hard", "HEAD"], { allowFailure: true });
+        ctx.ui.notify(
+          "Fix-merge session failed to resolve all conflicts. Working tree reset. Fix conflicts manually and restart.",
+          "error",
+        );
+        if (currentUnit) {
+          const modelId = ctx.model?.id ?? "unknown";
+          snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+          saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+        }
+        await stopAuto(ctx, pi);
+        return;
+      }
+    }
   }
 
   // ── General merge guard: merge completed slice branches before advancing ──
@@ -1150,15 +1136,58 @@ async function dispatchNextUnit(
             mid = state.activeMilestone?.id;
             midTitle = state.activeMilestone?.title;
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            // MergeConflictError: dispatch a fix-merge session to resolve conflicts
+            if (error instanceof MergeConflictError) {
+              const fixMergeUnitId = `${parsedBranch.milestoneId}/${parsedBranch.sliceId}`;
+              const fixMergePrompt = buildFixMergePrompt(error);
+              ctx.ui.notify(
+                `Merge conflict in ${error.conflictedFiles.length} file(s) — dispatching fix-merge session.`,
+                "warning",
+              );
 
-            // Safety net: if mergeSliceToMain failed to clean up (or the error
-            // came from switchToMain), ensure the working tree isn't left in a
-            // conflicted/dirty merge state. Without this, state derivation reads
-            // conflict-marker-filled files, produces a corrupt phase, and
-            // dispatch loops forever (see: merge-bug-fix).
+              // Close out the previously active unit before overwriting currentUnit.
+              if (currentUnit) {
+                const modelId = ctx.model?.id ?? "unknown";
+                snapshotUnitMetrics(
+                  ctx,
+                  currentUnit.type,
+                  currentUnit.id,
+                  currentUnit.startedAt,
+                  modelId,
+                );
+                saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+              }
+
+              // Dispatch fix-merge as the next unit (early-dispatch-and-return)
+              const fixMergeUnitType = "fix-merge";
+              currentUnit = { type: fixMergeUnitType, id: fixMergeUnitId, startedAt: Date.now() };
+              writeUnitRuntimeRecord(basePath, fixMergeUnitType, fixMergeUnitId, currentUnit.startedAt, {
+                phase: "dispatched",
+                wrapupWarningSent: false,
+                timeoutAt: null,
+                lastProgressAt: currentUnit.startedAt,
+                progressCount: 0,
+                lastProgressKind: "dispatch",
+              });
+              updateProgressWidget(ctx, fixMergeUnitType, fixMergeUnitId, state);
+              const result = await cmdCtx!.newSession();
+              if (result.cancelled) {
+                runGit(basePath, ["reset", "--hard", "HEAD"], { allowFailure: true });
+                await stopAuto(ctx, pi);
+                return;
+              }
+              const sessionFile = ctx.sessionManager.getSessionFile();
+              writeLock(basePath, fixMergeUnitType, fixMergeUnitId, completedUnits.length, sessionFile);
+              pi.sendMessage(
+                { customType: "gsd-auto", content: fixMergePrompt, display: verbose },
+                { triggerTurn: true },
+              );
+              return;
+            }
+
+            // Non-conflict errors: reset and stop
+            const message = error instanceof Error ? error.message : String(error);
             try {
-              const { runGit } = await import("./git-service.ts");
               const status = runGit(basePath, ["status", "--porcelain"], { allowFailure: true });
               if (status && (status.includes("UU ") || status.includes("AA ") || status.includes("UD "))) {
                 runGit(basePath, ["reset", "--hard", "HEAD"], { allowFailure: true });
@@ -1184,6 +1213,17 @@ async function dispatchNextUnit(
         }
       }
     }
+  }
+
+  // After merge, mid/midTitle may have been re-derived and could be undefined
+  if (!mid || !midTitle) {
+    if (currentUnit) {
+      const modelId = ctx.model?.id ?? "unknown";
+      snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+      saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+    }
+    await stopAuto(ctx, pi);
+    return;
   }
 
   // Determine next unit
@@ -1237,6 +1277,31 @@ async function dispatchNextUnit(
     }
   }
 
+  // ── Secrets re-check gate — runs before every dispatch, not just at startAuto ──
+  // plan-milestone writes the milestone SECRETS file (e.g., M001-SECRETS.md) during its unit. By the time we
+  // reach the next dispatchNextUnit call the manifest exists but hasn't been
+  // presented to the user yet. Without this re-check the model would proceed
+  // into plan-slice / execute-task with no real credentials and mock everything.
+  const runSecretsGate = async () => {
+    try {
+      const manifestStatus = await getManifestStatus(basePath, mid);
+      if (manifestStatus && manifestStatus.pending.length > 0) {
+        const result = await collectSecretsFromManifest(basePath, mid, ctx);
+        ctx.ui.notify(
+          `Secrets collected: ${result.applied.length} applied, ${result.skipped.length} skipped, ${result.existingSkipped.length} already set.`,
+          "info",
+        );
+      }
+    } catch (err) {
+      ctx.ui.notify(
+        `Secrets collection error: ${err instanceof Error ? err.message : String(err)}`,
+        "warning",
+      );
+    }
+  };
+
+  await runSecretsGate();
+
   const needsRunUat = await checkNeedsRunUat(basePath, mid, state, prefs);
   // Flag: for human/mixed UAT, pause auto-mode after the prompt is sent so the user
   // can perform the UAT manually. On next resume, result file will exist → skip.
@@ -1287,7 +1352,7 @@ async function dispatchNextUnit(
 
       // Research before roadmap if no research exists
       const researchFile = resolveMilestoneFile(basePath, mid, "RESEARCH");
-      const hasResearch = !!(researchFile && await loadFile(researchFile));
+      const hasResearch = !!researchFile;
 
       if (!hasResearch) {
         unitType = "research-milestone";
@@ -1304,13 +1369,13 @@ async function dispatchNextUnit(
       const sid = state.activeSlice!.id;
       const sTitle = state.activeSlice!.title;
       const researchFile = resolveSliceFile(basePath, mid, sid, "RESEARCH");
-      const hasResearch = !!(researchFile && await loadFile(researchFile));
+      const hasResearch = !!researchFile;
 
       if (!hasResearch) {
         // Skip slice research for S01 when milestone research already exists —
         // the milestone research already covers the same ground for the first slice.
         const milestoneResearchFile = resolveMilestoneFile(basePath, mid, "RESEARCH");
-        const hasMilestoneResearch = !!(milestoneResearchFile && await loadFile(milestoneResearchFile));
+        const hasMilestoneResearch = !!milestoneResearchFile;
         if (hasMilestoneResearch && sid === "S01") {
           unitType = "plan-slice";
           unitId = `${mid}/${sid}`;
@@ -1362,7 +1427,14 @@ async function dispatchNextUnit(
     }
   }
 
-  await emitObservabilityWarnings(ctx, unitType, unitId);
+  const priorSliceBlocker = getPriorSliceCompletionBlocker(basePath, getMainBranch(basePath), unitType, unitId);
+  if (priorSliceBlocker) {
+    await stopAuto(ctx, pi);
+    ctx.ui.notify(priorSliceBlocker, "error");
+    return;
+  }
+
+  const observabilityIssues = await collectObservabilityWarnings(ctx, unitType, unitId);
 
   // Idempotency: skip units already completed in a prior session.
   const idempotencyKey = `${unitType}/${unitId}`;
@@ -1411,6 +1483,26 @@ async function dispatchNextUnit(
   }
   unitDispatchCount.set(dispatchKey, prevCount + 1);
   if (prevCount > 0) {
+    // Self-repair: if summary exists but checkbox not marked, fix it and re-derive
+    if (unitType === "execute-task") {
+      const status = await inspectExecuteTaskDurability(basePath, unitId);
+      if (status?.summaryExists && !status.taskChecked) {
+        const [mid, sid, tid] = unitId.split("/");
+        if (mid && sid && tid) {
+          const repaired = skipExecuteTask(basePath, mid, sid, tid, status, "self-repair", 0);
+          if (repaired) {
+            ctx.ui.notify(
+              `Self-repaired ${unitId}: summary existed but checkbox was unmarked. Marked [x] and advancing.`,
+              "warning",
+            );
+            unitDispatchCount.delete(dispatchKey);
+            await new Promise(r => setImmediate(r));
+            await dispatchNextUnit(ctx, pi);
+            return;
+          }
+        }
+      }
+    }
     ctx.ui.notify(
       `${unitType} ${unitId} didn't produce expected artifact. Retrying (${prevCount + 1}/${MAX_UNIT_DISPATCHES}).`,
       "warning",
@@ -1420,74 +1512,8 @@ async function dispatchNextUnit(
   // The session still holds the previous unit's data (newSession hasn't fired yet).
   if (currentUnit) {
     const modelId = ctx.model?.id ?? "unknown";
-    const unitRecord = snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+    snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
     saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
-
-    // Flush embedding costs into the unit metrics record
-    const embeddingSnapshot = flushEmbeddingCosts();
-    if (unitRecord && embeddingSnapshot.cost > 0) {
-      unitRecord.embeddingCost = embeddingSnapshot.cost;
-      unitRecord.embeddingTokens = embeddingSnapshot.tokens;
-    }
-
-    // Flush quality gate events to the unit metrics record
-    const pendingGates = getGateEvents();
-    if (unitRecord && pendingGates.length > 0) {
-      unitRecord.gateEvents = pendingGates;
-    }
-    clearGateEvents();
-
-    // Programmatic correction detection — analyze the session for retries, stuck loops, etc.
-    emitProgrammaticCorrections(ctx, currentUnit.type, currentUnit.id);
-
-    // Pattern analysis — aggregate corrections into suggestions for skill refinement
-    try {
-      const prefs = loadEffectiveGSDPreferences()?.preferences;
-      if (prefs?.correction_capture !== false) {
-        analyzePatterns({ cwd: basePath });
-      }
-    } catch {
-      // Non-fatal — pattern analysis must never block dispatch
-    }
-
-    // Passive monitoring — detect plan-vs-summary drift after slice completions
-    try {
-      const pmPrefs = loadEffectiveGSDPreferences()?.preferences;
-      if (pmPrefs?.correction_capture !== false && currentUnit.type === "complete-slice") {
-        const [pmMid, pmSid] = currentUnit.id.split("/");
-        if (pmMid && pmSid) {
-          const planFile = resolveSliceFile(basePath, pmMid, pmSid, "PLAN");
-          const summaryFile = resolveSliceFile(basePath, pmMid, pmSid, "SUMMARY");
-          const planContent = planFile ? await loadFile(planFile) : null;
-          const summaryContent = summaryFile ? await loadFile(summaryFile) : null;
-          if (planContent && summaryContent) {
-            const drift = diffPlanVsSummary(planContent, summaryContent);
-            for (const obs of drift.observations) {
-              const diagCategory = obs.kind === "shift"
-                ? "process.planning_error" as const
-                : "code.scope_drift" as const;
-              const driftEntry = {
-                correction_from: `Slice ${pmMid}/${pmSid} plan`,
-                correction_to: `Slice ${pmMid}/${pmSid} summary — ${obs.kind}: ${obs.details}`,
-                diagnosis_category: diagCategory,
-                diagnosis_text: obs.details,
-                scope: "project",
-                phase: "completing",
-                timestamp: new Date().toISOString(),
-                session_id: `auto-complete-slice-${pmMid}/${pmSid}`,
-                source: "programmatic",
-                unit_type: "complete-slice",
-                unit_id: currentUnit.id,
-              } satisfies CorrectionEntry;
-              writeCorrection(driftEntry, { cwd: basePath });
-              embedCorrection(driftEntry);
-            }
-          }
-        }
-      }
-    } catch {
-      // Non-fatal — passive monitoring must never block dispatch
-    }
 
     // Only mark the previous unit as completed if:
     // 1. We're not about to re-dispatch the same unit (retry scenario)
@@ -1521,7 +1547,7 @@ async function dispatchNextUnit(
   });
 
   // Status bar + progress widget
-  setGSDStatus(ctx, "auto");
+  ctx.ui.setStatus("gsd-auto", "auto");
   if (mid) updateSliceProgressCache(basePath, mid, state.activeSlice?.id);
   updateProgressWidget(ctx, unitType, unitId, state);
 
@@ -1568,18 +1594,57 @@ async function dispatchNextUnit(
     }
   }
 
+  // Inject observability repair instructions so the agent fixes gaps before
+  // proceeding with the unit (see #174).
+  const repairBlock = buildObservabilityRepairBlock(observabilityIssues);
+  if (repairBlock) {
+    finalPrompt = `${finalPrompt}${repairBlock}`;
+  }
+
   // Switch model if preferences specify one for this unit type
   // Try primary model, then fallbacks in order if setting fails
   const modelConfig = resolveModelWithFallbacksForUnit(unitType);
   if (modelConfig) {
-    const allModels = ctx.modelRegistry.getAll();
+    const availableModels = ctx.modelRegistry.getAvailable();
     const modelsToTry = [modelConfig.primary, ...modelConfig.fallbacks];
     let modelSet = false;
 
     for (const modelId of modelsToTry) {
-      const model = allModels.find(m => m.id === modelId);
+      // Support "provider/model" format for explicit provider targeting
+      const slashIdx = modelId.indexOf("/");
+      let model;
+      if (slashIdx !== -1) {
+        const provider = modelId.substring(0, slashIdx);
+        const id = modelId.substring(slashIdx + 1);
+        model = availableModels.find(
+          m => m.provider.toLowerCase() === provider.toLowerCase()
+            && m.id.toLowerCase() === id.toLowerCase(),
+        );
+      } else {
+        // For bare IDs, prefer the current session's provider, then first available match
+        const currentProvider = ctx.model?.provider;
+        const exactProviderMatch = availableModels.find(
+          m => m.id === modelId && m.provider === currentProvider,
+        );
+        const anyMatch = availableModels.find(m => m.id === modelId);
+        model = exactProviderMatch ?? anyMatch;
+
+        // Warn if the ID is ambiguous across providers
+        if (anyMatch && !exactProviderMatch) {
+          const providers = availableModels
+            .filter(m => m.id === modelId)
+            .map(m => m.provider);
+          if (providers.length > 1) {
+            ctx.ui.notify(
+              `Model ID "${modelId}" exists in multiple providers (${providers.join(", ")}). ` +
+              `Resolved to ${anyMatch.provider}. Use "provider/model" format for explicit targeting.`,
+              "warning",
+            );
+          }
+        }
+      }
       if (!model) {
-        ctx.ui.notify(`Model ${modelId} not found in registry, trying fallback.`, "warning");
+        ctx.ui.notify(`Model ${modelId} not found in available models, trying fallback.`, "warning");
         continue;
       }
 
@@ -1620,9 +1685,9 @@ async function dispatchNextUnit(
   // soft timeout; only idle/stalled tasks pause early.
   clearUnitTimeout();
   const supervisor = resolveAutoSupervisorConfig();
-  const softTimeoutMs = supervisor.soft_timeout_minutes * 60 * 1000;
-  const idleTimeoutMs = supervisor.idle_timeout_minutes * 60 * 1000;
-  const hardTimeoutMs = supervisor.hard_timeout_minutes * 60 * 1000;
+  const softTimeoutMs = (supervisor.soft_timeout_minutes ?? 0) * 60 * 1000;
+  const idleTimeoutMs = (supervisor.idle_timeout_minutes ?? 0) * 60 * 1000;
+  const hardTimeoutMs = (supervisor.hard_timeout_minutes ?? 0) * 60 * 1000;
 
   wrapupWarningHandle = setTimeout(() => {
     wrapupWarningHandle = null;
@@ -1766,177 +1831,6 @@ function buildSkillDiscoveryVars(): { skillDiscoveryMode: string; skillDiscovery
   };
 }
 
-// ─── Correction Capture ───────────────────────────────────────────────────────
-
-/**
- * Static self-report instructions for the dispatch prompt.
- * Tells the executing agent how to log corrections when it catches its own mistakes.
- * In S01 this is always the same block. S03 will fill it with dynamic recall data.
- */
-const SELF_REPORT_INSTRUCTIONS = `
-10a. **Self-report corrections:** When you catch yourself making a mistake — wrong approach, bad pattern, misread requirement, stale assumption — log a correction entry so the system can learn from it. Append a single JSON line to \`.gsd/patterns/corrections.jsonl\` using \`bash\`:
-    \`\`\`
-    echo '{"correction_from":"<what you did wrong>","correction_to":"<what the fix was>","diagnosis_category":"<category>","diagnosis_text":"<1-2 sentence explanation>","scope":"<file|filetype|phase|project|global>","phase":"executing","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","session_id":"auto","source":"self_report"}' >> .gsd/patterns/corrections.jsonl
-    \`\`\`
-    Valid categories: \`code.wrong_pattern\`, \`code.missing_context\`, \`code.stale_knowledge\`, \`code.over_engineering\`, \`code.under_engineering\`, \`code.style_mismatch\`, \`code.scope_drift\`, \`process.planning_error\`, \`process.research_gap\`, \`process.implementation_bug\`, \`process.integration_miss\`, \`process.convention_violation\`, \`process.requirement_misread\`, \`process.regression\`.
-    Only log genuine corrections, not routine iterations. Keep \`diagnosis_text\` under 100 words.
-`.trim();
-
-/**
- * Build the corrections template variable value for execute-task dispatch.
- * Returns the self-report instruction block if correction capture is enabled,
- * or empty string if disabled.
- */
-async function buildCorrectionsVar(): Promise<string> {
-  const { provider, index } = await getEmbeddingSingletons();
-  return buildRecallBlock({
-    provider: provider ?? undefined,
-    vectorIndex: index ?? undefined,
-  });
-}
-
-function buildQualityVar(): string {
-  const level = resolveQualityLevel();
-  return buildQualityInstructions(level);
-}
-
-/**
- * Transform Pi session entries (from ctx.sessionManager.getEntries()) into
- * the detector's SessionEntry format. The Pi format uses nested message
- * wrappers; the detector expects flat {type, tool, input, result} objects.
- */
-export function transformSessionEntries(piEntries: unknown[]): DetectorSessionEntry[] {
-  const results: DetectorSessionEntry[] = [];
-
-  // Track pending tool calls by ID for matching with results
-  const pendingTools = new Map<string, { name: string; input: Record<string, unknown> }>();
-
-  for (const raw of piEntries) {
-    const entry = raw as Record<string, unknown>;
-    if (entry.type !== "message" || !entry.message) continue;
-    const msg = entry.message as Record<string, unknown>;
-
-    if (msg.role === "assistant" && Array.isArray(msg.content)) {
-      for (const part of msg.content as Record<string, unknown>[]) {
-        if (part.type === "toolCall") {
-          const name = String(part.name || "unknown");
-          const input = (part.arguments || part.input || {}) as Record<string, unknown>;
-          const id = String(part.id || "");
-          if (id) pendingTools.set(id, { name, input });
-        }
-      }
-    }
-
-    if (msg.role === "toolResult") {
-      const id = String(msg.toolCallId || "");
-      const pending = pendingTools.get(id);
-      if (pending) {
-        const content = msg.content;
-        let resultText = "";
-        if (typeof content === "string") {
-          resultText = content;
-        } else if (Array.isArray(content)) {
-          resultText = (content as Record<string, unknown>[])
-            .filter(c => c.type === "text")
-            .map(c => String(c.text || ""))
-            .join("\n");
-        }
-        results.push({
-          type: "tool_call",
-          tool: pending.name,
-          input: pending.input,
-          result: resultText.slice(0, 1000),
-        });
-        pendingTools.delete(id);
-      }
-    }
-  }
-
-  return results;
-}
-
-/**
- * Run programmatic correction detection on the current session entries and
- * write any detected corrections. Non-fatal — never blocks dispatch.
- */
-function emitProgrammaticCorrections(
-  ctx: ExtensionContext,
-  unitType: string,
-  unitId: string,
-): void {
-  try {
-    const prefs = loadEffectiveGSDPreferences()?.preferences;
-    if (prefs?.correction_capture === false) return;
-
-    const piEntries = ctx.sessionManager.getEntries();
-    if (!piEntries || piEntries.length === 0) return;
-
-    const detectorEntries = transformSessionEntries(piEntries);
-    if (detectorEntries.length === 0) return;
-
-    const corrections = detectCorrections({
-      session_id: `auto-${unitType}-${unitId}`,
-      phase: unitType,
-      entries: detectorEntries,
-      unit_type: unitType,
-      unit_id: unitId,
-    });
-
-    for (const correction of corrections) {
-      writeCorrection(correction, { cwd: basePath });
-      embedCorrection(correction);
-      try {
-        checkAndPromote(
-          { category: correction.diagnosis_category, scope: correction.scope },
-          { cwd: basePath },
-        );
-      } catch {
-        // Non-fatal — preference promotion must never block dispatch
-      }
-    }
-  } catch {
-    // Non-fatal — never block dispatch
-  }
-}
-
-/**
- * Emit a single correction entry for a stuck detection.
- * Called when retryCount > MAX_RETRIES for the same unit.
- */
-function emitStuckCorrection(unitType: string, unitId: string): void {
-  try {
-    const prefs = loadEffectiveGSDPreferences()?.preferences;
-    if (prefs?.correction_capture === false) return;
-
-    const entry: CorrectionEntry = {
-      correction_from: `Unit ${unitType} ${unitId} dispatched ${retryCount + 1} times without producing expected artifact`,
-      correction_to: "Auto-mode stopped due to stuck loop",
-      diagnosis_category: "process.implementation_bug",
-      diagnosis_text: `Stuck loop detected: ${unitType} ${unitId} was dispatched ${retryCount + 1} times. The expected durable artifact was not produced, indicating the agent could not complete this unit.`,
-      scope: "project",
-      phase: unitType,
-      timestamp: new Date().toISOString(),
-      session_id: `auto-${unitType}-${unitId}`,
-      source: "programmatic",
-      unit_type: unitType,
-      unit_id: unitId,
-    };
-
-    writeCorrection(entry, { cwd: basePath });
-    embedCorrection(entry);
-    try {
-      checkAndPromote(
-        { category: entry.diagnosis_category, scope: entry.scope },
-        { cwd: basePath },
-      );
-    } catch {
-      // Non-fatal — preference promotion must never block dispatch
-    }
-  } catch {
-    // Non-fatal
-  }
-}
-
 // ─── Inline Helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -2026,13 +1920,11 @@ async function buildResearchMilestonePrompt(mid: string, midTitle: string, base:
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relMilestoneFile(base, mid, "RESEARCH");
-  const outputAbsPath = resolveMilestoneFile(base, mid, "RESEARCH") ?? join(base, outputRelPath);
   return loadPrompt("research-milestone", {
     milestoneId: mid, milestoneTitle: midTitle,
     milestonePath: relMilestonePath(base, mid),
     contextPath: contextRel,
     outputPath: outputRelPath,
-    outputAbsPath,
     inlinedContext,
     ...buildSkillDiscoveryVars(),
   });
@@ -2060,7 +1952,6 @@ async function buildPlanMilestonePrompt(mid: string, midTitle: string, base: str
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relMilestoneFile(base, mid, "ROADMAP");
-  const outputAbsPath = resolveMilestoneFile(base, mid, "ROADMAP") ?? join(base, outputRelPath);
   const secretsOutputPath = relMilestoneFile(base, mid, "SECRETS");
   return loadPrompt("plan-milestone", {
     milestoneId: mid, milestoneTitle: midTitle,
@@ -2068,7 +1959,6 @@ async function buildPlanMilestonePrompt(mid: string, midTitle: string, base: str
     contextPath: contextRel,
     researchPath: researchRel,
     outputPath: outputRelPath,
-    outputAbsPath,
     secretsOutputPath,
     inlinedContext,
   });
@@ -2100,7 +1990,6 @@ async function buildResearchSlicePrompt(
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relSliceFile(base, mid, sid, "RESEARCH");
-  const outputAbsPath = resolveSliceFile(base, mid, sid, "RESEARCH") ?? join(base, outputRelPath);
   return loadPrompt("research-slice", {
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle,
     slicePath: relSlicePath(base, mid, sid),
@@ -2108,7 +1997,6 @@ async function buildResearchSlicePrompt(
     contextPath: contextRel,
     milestoneResearchPath: milestoneResearchRel,
     outputPath: outputRelPath,
-    outputAbsPath,
     inlinedContext,
     dependencySummaries: depContent,
     ...buildSkillDiscoveryVars(),
@@ -2137,16 +2025,12 @@ async function buildPlanSlicePrompt(
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relSliceFile(base, mid, sid, "PLAN");
-  const outputAbsPath = resolveSliceFile(base, mid, sid, "PLAN") ?? join(base, outputRelPath);
-  const sliceAbsPath = resolveSlicePath(base, mid, sid) ?? join(base, relSlicePath(base, mid, sid));
   return loadPrompt("plan-slice", {
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle,
     slicePath: relSlicePath(base, mid, sid),
-    sliceAbsPath,
     roadmapPath: roadmapRel,
     researchPath: researchRel,
     outputPath: outputRelPath,
-    outputAbsPath,
     inlinedContext,
     dependencySummaries: depContent,
   });
@@ -2197,8 +2081,7 @@ async function buildExecuteTaskPrompt(
 
   const carryForwardSection = await buildCarryForwardSection(priorSummaries, base);
 
-  const sliceDirAbs = resolveSlicePath(base, mid, sid) ?? join(base, relSlicePath(base, mid, sid));
-  const taskSummaryAbsPath = join(sliceDirAbs, "tasks", `${tid}-SUMMARY.md`);
+  const taskSummaryPath = `${relSlicePath(base, mid, sid)}/tasks/${tid}-SUMMARY.md`;
 
   return loadPrompt("execute-task", {
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle, taskId: tid, taskTitle: tTitle,
@@ -2210,9 +2093,7 @@ async function buildExecuteTaskPrompt(
     carryForwardSection,
     resumeSection,
     priorTaskLines: priorLines,
-    taskSummaryAbsPath,
-    corrections: await buildCorrectionsVar(),
-    quality: buildQualityVar(),
+    taskSummaryPath,
   });
 }
 
@@ -2248,17 +2129,17 @@ async function buildCompleteSlicePrompt(
 
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
-  const sliceDirAbs = resolveSlicePath(base, mid, sid) ?? join(base, relSlicePath(base, mid, sid));
-  const sliceSummaryAbsPath = join(sliceDirAbs, `${sid}-SUMMARY.md`);
-  const sliceUatAbsPath = join(sliceDirAbs, `${sid}-UAT.md`);
+  const sliceRel = relSlicePath(base, mid, sid);
+  const sliceSummaryPath = `${sliceRel}/${sid}-SUMMARY.md`;
+  const sliceUatPath = `${sliceRel}/${sid}-UAT.md`;
 
   return loadPrompt("complete-slice", {
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle,
-    slicePath: relSlicePath(base, mid, sid),
+    slicePath: sliceRel,
     roadmapPath: roadmapRel,
     inlinedContext,
-    sliceSummaryAbsPath,
-    sliceUatAbsPath,
+    sliceSummaryPath,
+    sliceUatPath,
   });
 }
 
@@ -2297,15 +2178,14 @@ async function buildCompleteMilestonePrompt(
 
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
-  const milestoneDirAbs = resolveMilestonePath(base, mid) ?? join(base, relMilestonePath(base, mid));
-  const milestoneSummaryAbsPath = join(milestoneDirAbs, `${mid}-SUMMARY.md`);
+  const milestoneSummaryPath = `${relMilestonePath(base, mid)}/${mid}-SUMMARY.md`;
 
   return loadPrompt("complete-milestone", {
     milestoneId: mid,
     milestoneTitle: midTitle,
     roadmapPath: roadmapRel,
     inlinedContext,
-    milestoneSummaryAbsPath,
+    milestoneSummaryPath,
   });
 }
 
@@ -2348,8 +2228,7 @@ async function buildReplanSlicePrompt(
 
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
-  const sliceDirAbs = resolveSlicePath(base, mid, sid) ?? join(base, relSlicePath(base, mid, sid));
-  const replanAbsPath = join(sliceDirAbs, `${sid}-REPLAN.md`);
+  const replanPath = `${relSlicePath(base, mid, sid)}/${sid}-REPLAN.md`;
 
   return loadPrompt("replan-slice", {
     milestoneId: mid,
@@ -2359,7 +2238,7 @@ async function buildReplanSlicePrompt(
     planPath: slicePlanRel,
     blockerTaskId,
     inlinedContext,
-    replanAbsPath,
+    replanPath,
   });
 }
 
@@ -2477,8 +2356,6 @@ async function buildRunUatPrompt(
 
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
-  const sliceDirAbs = resolveSlicePath(base, mid, sliceId) ?? join(base, relSlicePath(base, mid, sliceId));
-  const uatResultAbsPath = join(sliceDirAbs, `${sliceId}-UAT-RESULT.md`);
   const uatResultPath = relSliceFile(base, mid, sliceId, "UAT-RESULT");
   const uatType = extractUatType(uatContent) ?? "human-experience";
 
@@ -2486,7 +2363,6 @@ async function buildRunUatPrompt(
     milestoneId: mid,
     sliceId,
     uatPath,
-    uatResultAbsPath,
     uatResultPath,
     uatType,
     inlinedContext,
@@ -2513,9 +2389,7 @@ async function buildReassessRoadmapPrompt(
 
   const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
-  const assessmentRel = relSliceFile(base, mid, completedSliceId, "ASSESSMENT");
-  const sliceDirAbs = resolveSlicePath(base, mid, completedSliceId) ?? join(base, relSlicePath(base, mid, completedSliceId));
-  const assessmentAbsPath = join(sliceDirAbs, `${completedSliceId}-ASSESSMENT.md`);
+  const assessmentPath = relSliceFile(base, mid, completedSliceId, "ASSESSMENT");
 
   return loadPrompt("reassess-roadmap", {
     milestoneId: mid,
@@ -2523,10 +2397,48 @@ async function buildReassessRoadmapPrompt(
     completedSliceId,
     roadmapPath: roadmapRel,
     completedSliceSummaryPath: summaryRel,
-    assessmentPath: assessmentRel,
-    assessmentAbsPath,
+    assessmentPath,
     inlinedContext,
   });
+}
+
+/**
+ * Build a prompt for the fix-merge LLM session that resolves merge conflicts.
+ */
+function buildFixMergePrompt(err: MergeConflictError): string {
+  const strategyLabel = err.strategy === "merge" ? "merge --no-ff" : "squash merge";
+  const fileList = err.conflictedFiles.map(f => `  - \`${f}\``).join("\n");
+
+  return [
+    `# Fix Merge Conflicts`,
+    ``,
+    `A ${strategyLabel} of branch \`${err.branch}\` into \`${err.mainBranch}\` produced conflicts in the following files:`,
+    ``,
+    fileList,
+    ``,
+    `## Instructions`,
+    ``,
+    `1. Read each conflicted file listed above`,
+    `2. Resolve all conflict markers (\`<<<<<<<\`, \`=======\`, \`>>>>>>>\`) by choosing the correct content`,
+    `3. Stage the resolved files with \`git add <file>\``,
+    `4. Commit the resolution:`,
+    err.strategy === "squash"
+      ? `   - This is a squash merge, so run: \`git commit --no-edit\` (the squash message is already prepared)`
+      : `   - This is a --no-ff merge, so run: \`git commit --no-edit\` (the merge message is already prepared)`,
+    ``,
+    `## Rules`,
+    ``,
+    `- Do NOT run \`git merge --abort\` or \`git reset\``,
+    `- Do NOT modify any files other than the conflicted ones listed above`,
+    `- Preserve the intent of both sides of the conflict — prefer the slice branch changes when the intent is unclear`,
+    ``,
+    `## Verification`,
+    ``,
+    `After committing, verify:`,
+    `1. \`git diff --name-only --diff-filter=U\` returns empty (no unmerged files)`,
+    `2. The conflicted files no longer contain any \`<<<<<<<\`, \`=======\`, or \`>>>>>>>\` markers`,
+    `3. \`git status\` shows a clean working tree`,
+  ].join("\n");
 }
 
 function extractSliceExecutionExcerpt(content: string | null, relPath: string): string {
@@ -2704,17 +2616,17 @@ function ensurePreconditions(
 
 // ─── Diagnostics ──────────────────────────────────────────────────────────────
 
-async function emitObservabilityWarnings(
+async function collectObservabilityWarnings(
   ctx: ExtensionContext,
   unitType: string,
   unitId: string,
-): Promise<void> {
+): Promise<import("./observability-validator.ts").ValidationIssue[]> {
   const parts = unitId.split("/");
   const mid = parts[0];
   const sid = parts[1];
   const tid = parts[2];
 
-  if (!mid || !sid) return;
+  if (!mid || !sid) return [];
 
   let issues = [] as Awaited<ReturnType<typeof validatePlanBoundary>>;
 
@@ -2726,12 +2638,38 @@ async function emitObservabilityWarnings(
     issues = await validateCompleteBoundary(basePath, mid, sid);
   }
 
-  if (issues.length === 0) return;
+  if (issues.length > 0) {
+    ctx.ui.notify(
+      `Observability check (${unitType}) found ${issues.length} warning${issues.length === 1 ? "" : "s"}:\n${formatValidationIssues(issues)}`,
+      "warning",
+    );
+  }
 
-  ctx.ui.notify(
-    `Observability check (${unitType}) found ${issues.length} warning${issues.length === 1 ? "" : "s"}:\n${formatValidationIssues(issues)}`,
-    "warning",
-  );
+  return issues;
+}
+
+function buildObservabilityRepairBlock(issues: import("./observability-validator.ts").ValidationIssue[]): string {
+  if (issues.length === 0) return "";
+  const items = issues.map(issue => {
+    const fileName = issue.file.split("/").pop() || issue.file;
+    let line = `- **${fileName}**: ${issue.message}`;
+    if (issue.suggestion) line += ` → ${issue.suggestion}`;
+    return line;
+  });
+  return [
+    "",
+    "---",
+    "",
+    "## Pre-flight: Observability gaps to fix FIRST",
+    "",
+    "The following issues were detected in plan/summary files for this unit.",
+    "**Read each flagged file, apply the fix described, then proceed with the unit.**",
+    "",
+    ...items,
+    "",
+    "---",
+    "",
+  ].join("\n");
 }
 
 async function recoverTimedOutUnit(
@@ -3077,20 +3015,71 @@ export function resolveExpectedArtifactPath(unitType: string, unitId: string, ba
       const dir = resolveMilestonePath(base, mid);
       return dir ? join(dir, buildMilestoneFileName(mid, "SUMMARY")) : null;
     }
+    case "fix-merge":
+      return null;
     default:
       return null;
   }
 }
 
 /**
- * Check whether the expected artifact for a unit exists on disk.
- * Returns true if the artifact file exists, or if the unit type has no
+ * Check whether the expected artifact(s) for a unit exist on disk.
+ * Returns true if all required artifacts exist, or if the unit type has no
  * single verifiable artifact (e.g., replan-slice).
+ *
+ * complete-slice requires both SUMMARY and UAT files — verifying only
+ * the summary allowed the unit to be marked complete when the LLM
+ * skipped writing the UAT file (see #176).
  */
-function verifyExpectedArtifact(unitType: string, unitId: string, base: string): boolean {
+export function verifyExpectedArtifact(unitType: string, unitId: string, base: string): boolean {
+  // fix-merge has no file artifact — verify by checking git state
+  if (unitType === "fix-merge") {
+    const unmerged = runGit(base, ["diff", "--name-only", "--diff-filter=U"], { allowFailure: true });
+    if (unmerged && unmerged.trim()) return false;
+    if (existsSync(join(base, ".git", "MERGE_HEAD"))) return false;
+    if (existsSync(join(base, ".git", "SQUASH_MSG"))) return false;
+    return true;
+  }
+
   const absPath = resolveExpectedArtifactPath(unitType, unitId, base);
-  if (!absPath) return true;
-  return existsSync(absPath);
+  // Unit types with no verifiable artifact always pass (e.g. replan-slice).
+  // For all other types, null means the parent directory is missing on disk
+  // — treat as stale completion state so the key gets evicted (#313).
+  if (!absPath) return unitType === "replan-slice";
+  if (!existsSync(absPath)) return false;
+
+  // execute-task must also have its checkbox marked [x] in the slice plan
+  if (unitType === "execute-task") {
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
+    const tid = parts[2];
+    if (mid && sid && tid) {
+      const planAbs = resolveSliceFile(base, mid, sid, "PLAN");
+      if (planAbs && existsSync(planAbs)) {
+        const planContent = readFileSync(planAbs, "utf-8");
+        const escapedTid = tid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`^- \\[[xX]\\] \\*\\*${escapedTid}:`, "m");
+        if (!re.test(planContent)) return false;
+      }
+    }
+  }
+
+  // complete-slice must also produce a UAT file
+  if (unitType === "complete-slice") {
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
+    if (mid && sid) {
+      const dir = resolveSlicePath(base, mid, sid);
+      if (dir) {
+        const uatPath = join(dir, buildSliceFileName(sid, "UAT"));
+        if (!existsSync(uatPath)) return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -3100,7 +3089,7 @@ function verifyExpectedArtifact(unitType: string, unitId: string, base: string):
 export function writeBlockerPlaceholder(unitType: string, unitId: string, base: string, reason: string): string | null {
   const absPath = resolveExpectedArtifactPath(unitType, unitId, base);
   if (!absPath) return null;
-  const dir = absPath.substring(0, absPath.lastIndexOf("/"));
+  const dir = dirname(absPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const content = [
     `# BLOCKER — auto-mode recovery failed`,
@@ -3134,7 +3123,7 @@ function diagnoseExpectedArtifact(unitType: string, unitId: string, base: string
       return `Task ${tid} marked [x] in ${relSliceFile(base, mid!, sid!, "PLAN")} + summary written`;
     }
     case "complete-slice":
-      return `Slice ${sid} marked [x] in ${relMilestoneFile(base, mid!, "ROADMAP")} + summary written`;
+      return `Slice ${sid} marked [x] in ${relMilestoneFile(base, mid!, "ROADMAP")} + summary + UAT written`;
     case "replan-slice":
       return `${relSliceFile(base, mid!, sid!, "REPLAN")} + updated ${relSliceFile(base, mid!, sid!, "PLAN")}`;
     case "reassess-roadmap":
@@ -3143,6 +3132,8 @@ function diagnoseExpectedArtifact(unitType: string, unitId: string, base: string
       return `${relSliceFile(base, mid!, sid!, "UAT-RESULT")} (UAT result)`;
     case "complete-milestone":
       return `${relMilestoneFile(base, mid!, "SUMMARY")} (milestone summary)`;
+    case "fix-merge":
+      return "Clean working tree with no unmerged files, no MERGE_HEAD, no SQUASH_MSG (merge conflict resolution)";
     default:
       return null;
   }

@@ -17,11 +17,12 @@
 
 import { sep } from "node:path";
 
-import { GitServiceImpl } from "./git-service.ts";
+import { GitServiceImpl, writeIntegrationBranch } from "./git-service.ts";
 import { loadEffectiveGSDPreferences } from "./preferences.ts";
 
 // Re-export MergeSliceResult from the canonical source (D014 — type-only re-export)
 export type { MergeSliceResult } from "./git-service.ts";
+export { MergeConflictError } from "./git-service.ts";
 
 // ─── Lazy GitServiceImpl Cache ─────────────────────────────────────────────
 
@@ -41,6 +42,27 @@ function getService(basePath: string): GitServiceImpl {
     cachedBasePath = basePath;
   }
   return cachedService;
+}
+
+/**
+ * Set the active milestone ID on the cached GitServiceImpl.
+ * This enables integration branch resolution in getMainBranch().
+ */
+export function setActiveMilestoneId(basePath: string, milestoneId: string | null): void {
+  getService(basePath).setMilestoneId(milestoneId);
+}
+
+/**
+ * Record the current branch as the integration branch for a milestone.
+ * Called once when auto-mode starts — captures where slice branches should
+ * merge back to. No-op if the same branch is already recorded. Updates the
+ * record when the user starts from a different branch (#300). Always a no-op
+ * if on a GSD slice branch.
+ */
+export function captureIntegrationBranch(basePath: string, milestoneId: string): void {
+  const svc = getService(basePath);
+  const current = svc.getCurrentBranch();
+  writeIntegrationBranch(basePath, milestoneId, current);
 }
 
 // ─── Pure Utility Functions (unchanged) ────────────────────────────────────

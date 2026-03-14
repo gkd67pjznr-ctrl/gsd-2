@@ -6,8 +6,10 @@ import { join } from "node:path";
 import type { AgentTool } from "@gsd/pi-agent-core";
 import { type Static, Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
-import { getShellConfig, getShellEnv, killProcessTree } from "../../utils/shell.js";
+import { getShellConfig, getShellEnv, killProcessTree, sanitizeCommand } from "../../utils/shell.js";
+import { type BashInterceptorRule, compileInterceptor, DEFAULT_BASH_INTERCEPTOR_RULES } from "./bash-interceptor.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
+import type { ArtifactManager } from "../artifact-manager.js";
 
 // Cached Win32 FFI handles for restoring VT input after child processes
 let _vtHandles: { GetConsoleMode: any; SetConsoleMode: any; handle: any } | null = null;
@@ -51,6 +53,7 @@ export type BashToolInput = Static<typeof bashSchema>;
 export interface BashToolDetails {
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
+	artifactId?: string;
 }
 
 /**
@@ -187,12 +190,28 @@ export interface BashToolOptions {
 	commandPrefix?: string;
 	/** Hook to adjust command, cwd, or env before execution */
 	spawnHook?: BashSpawnHook;
+	/** Session-scoped artifact storage. When provided, spills to artifact files instead of temp files. */
+	artifactManager?: ArtifactManager;
+	/** Bash interceptor configuration — blocks commands that duplicate dedicated tools */
+	interceptor?: {
+		enabled: boolean;
+		rules?: BashInterceptorRule[];
+	};
+	/** Tool names available in the session, used by the interceptor to check if replacement tools exist */
+	availableToolNames?: string[] | (() => string[]);
 }
 
 export function createBashTool(cwd: string, options?: BashToolOptions): AgentTool<typeof bashSchema> {
 	const ops = options?.operations ?? defaultBashOperations;
 	const commandPrefix = options?.commandPrefix;
 	const spawnHook = options?.spawnHook;
+	const artifactManager = options?.artifactManager;
+
+	// Pre-compile interceptor rules once at construction time
+	const interceptorInstance =
+		options?.interceptor?.enabled
+			? compileInterceptor(options.interceptor.rules ?? DEFAULT_BASH_INTERCEPTOR_RULES)
+			: null;
 
 	return {
 		name: "bash",
@@ -205,14 +224,30 @@ export function createBashTool(cwd: string, options?: BashToolOptions): AgentToo
 			signal?: AbortSignal,
 			onUpdate?,
 		) => {
+			// Check bash interceptor — block commands that duplicate dedicated tools
+			if (interceptorInstance) {
+				const toolNames =
+					typeof options!.availableToolNames === "function"
+						? options!.availableToolNames()
+						: options!.availableToolNames ?? [];
+				const interception = interceptorInstance.check(command, toolNames);
+				if (interception.block) {
+					return {
+						content: [{ type: "text" as const, text: interception.message ?? "Command blocked by interceptor" }],
+						details: undefined,
+					};
+				}
+			}
+
 			// Apply command prefix if configured (e.g., "shopt -s expand_aliases" for alias support)
-			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			const resolvedCommand = sanitizeCommand(commandPrefix ? `${commandPrefix}\n${command}` : command);
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 
 			return new Promise((resolve, reject) => {
-				// We'll stream to a temp file if output gets large
-				let tempFilePath: string | undefined;
-				let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
+				// We'll stream to a file if output gets large
+				let spillFilePath: string | undefined;
+				let spillArtifactId: string | undefined;
+				let spillFileStream: ReturnType<typeof createWriteStream> | undefined;
 				let totalBytes = 0;
 
 				// Keep a rolling buffer of the last chunk for tail truncation
@@ -224,19 +259,25 @@ export function createBashTool(cwd: string, options?: BashToolOptions): AgentToo
 				const handleData = (data: Buffer) => {
 					totalBytes += data.length;
 
-					// Start writing to temp file once we exceed the threshold
-					if (totalBytes > DEFAULT_MAX_BYTES && !tempFilePath) {
-						tempFilePath = getTempFilePath();
-						tempFileStream = createWriteStream(tempFilePath);
+					// Start writing to file once we exceed the threshold
+					if (totalBytes > DEFAULT_MAX_BYTES && !spillFilePath) {
+						if (artifactManager) {
+							const allocated = artifactManager.allocatePath("bash");
+							spillFilePath = allocated.path;
+							spillArtifactId = allocated.id;
+						} else {
+							spillFilePath = getTempFilePath();
+						}
+						spillFileStream = createWriteStream(spillFilePath);
 						// Write all buffered chunks to the file
 						for (const chunk of chunks) {
-							tempFileStream.write(chunk);
+							spillFileStream.write(chunk);
 						}
 					}
 
 					// Write to temp file if we have one
-					if (tempFileStream) {
-						tempFileStream.write(data);
+					if (spillFileStream) {
+						spillFileStream.write(data);
 					}
 
 					// Keep rolling buffer of recent data
@@ -258,7 +299,7 @@ export function createBashTool(cwd: string, options?: BashToolOptions): AgentToo
 							content: [{ type: "text", text: truncation.content || "" }],
 							details: {
 								truncation: truncation.truncated ? truncation : undefined,
-								fullOutputPath: tempFilePath,
+								fullOutputPath: spillFilePath,
 							},
 						});
 					}
@@ -272,8 +313,8 @@ export function createBashTool(cwd: string, options?: BashToolOptions): AgentToo
 				})
 					.then(({ exitCode }) => {
 						// Close temp file stream
-						if (tempFileStream) {
-							tempFileStream.end();
+						if (spillFileStream) {
+							spillFileStream.end();
 						}
 
 						// Combine all buffered chunks
@@ -290,21 +331,22 @@ export function createBashTool(cwd: string, options?: BashToolOptions): AgentToo
 						if (truncation.truncated) {
 							details = {
 								truncation,
-								fullOutputPath: tempFilePath,
+								fullOutputPath: spillFilePath,
+								...(spillArtifactId ? { artifactId: spillArtifactId } : {}),
 							};
 
 							// Build actionable notice
 							const startLine = truncation.totalLines - truncation.outputLines + 1;
 							const endLine = truncation.totalLines;
+							const outputRef = spillArtifactId ? `artifact://${spillArtifactId}` : spillFilePath;
 
 							if (truncation.lastLinePartial) {
-								// Edge case: last line alone > 30KB
 								const lastLineSize = formatSize(Buffer.byteLength(fullOutput.split("\n").pop() || "", "utf-8"));
-								outputText += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${tempFilePath}]`;
+								outputText += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${outputRef}]`;
 							} else if (truncation.truncatedBy === "lines") {
-								outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${tempFilePath}]`;
+								outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${outputRef}]`;
 							} else {
-								outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${tempFilePath}]`;
+								outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${outputRef}]`;
 							}
 						}
 
@@ -317,8 +359,8 @@ export function createBashTool(cwd: string, options?: BashToolOptions): AgentToo
 					})
 					.catch((err: Error) => {
 						// Close temp file stream
-						if (tempFileStream) {
-							tempFileStream.end();
+						if (spillFileStream) {
+							spillFileStream.end();
 						}
 
 						// Combine all buffered chunks for error output

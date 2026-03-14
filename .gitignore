@@ -1,13 +1,8 @@
 
-# ── GSD (user project artifacts — selective commit) ──
-# Allow .gsd/ planning artifacts, ignore runtime/ephemeral files
-!.gsd/
-.gsd/activity/
-.gsd/runtime/
-.gsd/worktrees/
-.gsd/auto.lock
-.gsd/metrics.json
-.gsd/patterns/
+# ── GSD (user project artifacts — never commit) ──
+.gsd/
+.claude/
+*.tgz
 .DS_Store
 Thumbs.db
 *.swp
@@ -43,12 +38,20 @@ packages/*/node_modules/
 # ── GSD baseline (auto-generated) ──
 dist/
 .bg_shell
-.bg-shell/
 .gsd*.tgz
 .artifacts/
 AGENTS.md
+.bg-shell/
 TODOS.md
 .planning/
 
-# ── GSD ephemeral state ──
+# ── GSD baseline (auto-generated) ──
+.gsd/
+
+# ── GSD baseline (auto-generated) ──
+.gsd/activity/
+.gsd/runtime/
+.gsd/worktrees/
+.gsd/auto.lock
+.gsd/metrics.json
 .gsd/STATE.md

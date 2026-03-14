@@ -13,7 +13,7 @@ import {
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 
-const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
+export const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
 	low: "Light reasoning (~2k tokens)",
@@ -73,7 +73,7 @@ export interface SettingsCallbacks {
 /**
  * A submenu component for selecting from a list of options.
  */
-class SelectSubmenu extends Container {
+export class SelectSubmenu extends Container {
 	private selectList: SelectList;
 
 	constructor(
@@ -163,7 +163,7 @@ export class SettingsSelectorComponent extends Container {
 				id: "follow-up-mode",
 				label: "Follow-up mode",
 				description:
-					"Alt+Enter queues follow-up messages until agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+					`${process.platform === "darwin" ? "⌥Enter" : "Alt+Enter"} queues follow-up messages until agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.`,
 				currentValue: config.followUpMode,
 				values: ["one-at-a-time", "all"],
 			},
