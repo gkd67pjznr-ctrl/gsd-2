@@ -3,9 +3,10 @@
 // Used by state derivation and the status widget.
 // Pure functions, zero Pi dependencies - uses only Node built-ins.
 
-import { promises as fs, readdirSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { milestonesDir, resolveMilestoneFile, relMilestoneFile } from './paths.js';
+import { resolveMilestoneFile, relMilestoneFile } from './paths.js';
+import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
 
 import type {
   Roadmap, BoundaryMapEntry,
@@ -15,11 +16,39 @@ import type {
   RequirementCounts,
   SecretsManifest, SecretsManifestEntry, SecretsManifestEntryStatus,
   ManifestStatus,
-} from './types.ts';
+} from './types.js';
 
-import { checkExistingEnvKeys } from '../get-secrets-from-user.ts';
-import { parseRoadmapSlices } from './roadmap-slices.ts';
-import { nativeParseRoadmap, nativeExtractSection, NATIVE_UNAVAILABLE } from './native-parser-bridge.ts';
+import { checkExistingEnvKeys } from '../get-secrets-from-user.js';
+import { parseRoadmapSlices } from './roadmap-slices.js';
+import { nativeParseRoadmap, nativeExtractSection, NATIVE_UNAVAILABLE } from './native-parser-bridge.js';
+
+// ─── Parse Cache ──────────────────────────────────────────────────────────
+
+const CACHE_MAX = 50;
+
+/** Fast composite key: length + first/last 100 chars. Unique enough for distinct markdown files. */
+function cacheKey(content: string): string {
+  const len = content.length;
+  const head = content.slice(0, 100);
+  const tail = len > 100 ? content.slice(-100) : '';
+  return `${len}:${head}:${tail}`;
+}
+
+const _parseCache = new Map<string, unknown>();
+
+function cachedParse<T>(content: string, tag: string, parseFn: (c: string) => T): T {
+  const key = tag + '|' + cacheKey(content);
+  if (_parseCache.has(key)) return _parseCache.get(key) as T;
+  if (_parseCache.size >= CACHE_MAX) _parseCache.clear();
+  const result = parseFn(content);
+  _parseCache.set(key, result);
+  return result;
+}
+
+/** Clear the module-scoped parse cache. Call when files change on disk. */
+export function clearParseCache(): void {
+  _parseCache.clear();
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -187,6 +216,10 @@ export function extractBoldField(text: string, key: string): string | null {
 // ─── Roadmap Parser ────────────────────────────────────────────────────────
 
 export function parseRoadmap(content: string): Roadmap {
+  return cachedParse(content, 'roadmap', _parseRoadmapImpl);
+}
+
+function _parseRoadmapImpl(content: string): Roadmap {
   // Try native parser first for better performance
   const nativeResult = nativeParseRoadmap(content);
   if (nativeResult) return nativeResult;
@@ -209,7 +242,7 @@ export function parseRoadmap(content: string): Roadmap {
     })();
   const successCriteria = scSection ? parseBullets(scSection) : [];
 
-  // Slices  
+  // Slices
   const slices = parseRoadmapSlices(content);
 
   // Boundary map
@@ -317,6 +350,10 @@ export function formatSecretsManifest(manifest: SecretsManifest): string {
 // ─── Slice Plan Parser ─────────────────────────────────────────────────────
 
 export function parsePlan(content: string): SlicePlan {
+  return cachedParse(content, 'plan', _parsePlanImpl);
+}
+
+function _parsePlanImpl(content: string): SlicePlan {
   const lines = content.split('\n');
 
   const h1 = lines.find(l => l.startsWith('# '));
@@ -395,6 +432,10 @@ export function parsePlan(content: string): SlicePlan {
 // ─── Summary Parser ────────────────────────────────────────────────────────
 
 export function parseSummary(content: string): Summary {
+  return cachedParse(content, 'summary', _parseSummaryImpl);
+}
+
+function _parseSummaryImpl(content: string): Summary {
   const [fmLines, body] = splitFrontmatter(content);
 
   const fm = fmLines ? parseFrontmatterMap(fmLines) : {};
@@ -459,6 +500,10 @@ export function parseSummary(content: string): Summary {
 // ─── Continue Parser ───────────────────────────────────────────────────────
 
 export function parseContinue(content: string): Continue {
+  return cachedParse(content, 'continue', _parseContinueImpl);
+}
+
+function _parseContinueImpl(content: string): Continue {
   const [fmLines, body] = splitFrontmatter(content);
 
   const fm = fmLines ? parseFrontmatterMap(fmLines) : {};
@@ -755,23 +800,11 @@ export function parseContextDependsOn(content: string | null): string[] {
  * Inline the prior milestone's SUMMARY.md as context for the current milestone's planning prompt.
  * Returns null when: (1) `mid` is the first milestone, (2) prior milestone has no SUMMARY file.
  *
- * Scans the milestones directory using the same readdirSync + sort + M\d+ match pattern
- * as findMilestoneIds in state.ts.
+ * Uses the shared findMilestoneIds to scan the milestones directory.
  */
 export async function inlinePriorMilestoneSummary(mid: string, base: string): Promise<string | null> {
-  const dir = milestonesDir(base);
-  let sorted: string[];
-  try {
-    sorted = readdirSync(dir, { withFileTypes: true })
-      .filter(d => d.isDirectory())
-      .map(d => {
-        const match = d.name.match(/^(M\d+)/);
-        return match ? match[1] : d.name;
-      })
-      .sort();
-  } catch {
-    return null;
-  }
+  const sorted = findMilestoneIds(base);
+  if (sorted.length === 0) return null;
   const idx = sorted.indexOf(mid);
   if (idx <= 0) return null;
   const prevMid = sorted[idx - 1];

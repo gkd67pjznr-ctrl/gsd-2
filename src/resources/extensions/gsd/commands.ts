@@ -53,10 +53,10 @@ function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportT
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd next|auto|stop|status|queue|prefs|doctor|migrate|remote",
+    description: "GSD — Get Shit Done: /gsd next|auto|stop|status|queue|prefs|hooks|doctor|migrate|remote",
 
     getArgumentCompletions: (prefix: string) => {
-      const subcommands = ["next", "auto", "stop", "status", "queue", "discuss", "prefs", "doctor", "migrate", "remote"];
+      const subcommands = ["next", "auto", "stop", "status", "queue", "discuss", "prefs", "hooks", "doctor", "migrate", "remote"];
       const parts = prefix.trim().split(/\s+/);
 
       if (parts.length <= 1) {
@@ -151,6 +151,12 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "hooks") {
+        const { formatHookStatus } = await import("./post-unit-hooks.js");
+        ctx.ui.notify(formatHookStatus(), "info");
+        return;
+      }
+
       if (trimmed === "migrate" || trimmed.startsWith("migrate ")) {
         await handleMigrate(trimmed.replace(/^migrate\s*/, "").trim(), ctx, pi);
         return;
@@ -168,7 +174,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd next, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd prefs [global|project|status|wizard|setup], /gsd doctor [audit|fix|heal] [M###/S##], /gsd migrate <path>, or /gsd remote [slack|discord|status|disconnect].`,
+        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd next, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd prefs [global|project|status|wizard|setup], /gsd hooks, /gsd doctor [audit|fix|heal] [M###/S##], /gsd migrate <path>, or /gsd remote [slack|discord|status|disconnect].`,
         "warning",
       );
     },
@@ -393,6 +399,16 @@ async function handlePrefsWizard(
     prefs.skill_discovery = discoveryChoice;
   }
 
+  // ─── Unique milestone IDs ──────────────────────────────────────────────
+  const currentUnique = prefs.unique_milestone_ids;
+  const uniqueChoice = await ctx.ui.select(
+    `Unique milestone IDs${currentUnique !== undefined ? ` (current: ${currentUnique})` : ""}:`,
+    ["true", "false", "(keep current)"],
+  );
+  if (uniqueChoice && uniqueChoice !== "(keep current)") {
+    prefs.unique_milestone_ids = uniqueChoice === "true";
+  }
+
   // ─── Serialize to frontmatter ───────────────────────────────────────────
   prefs.version = prefs.version || 1;
   const frontmatter = serializePreferencesToFrontmatter(prefs);
@@ -485,7 +501,7 @@ function serializePreferencesToFrontmatter(prefs: Record<string, unknown>): stri
   const orderedKeys = [
     "version", "always_use_skills", "prefer_skills", "avoid_skills",
     "skill_rules", "custom_instructions", "models", "skill_discovery",
-    "auto_supervisor", "uat_dispatch", "budget_ceiling", "remote_questions", "git",
+    "auto_supervisor", "uat_dispatch", "unique_milestone_ids", "budget_ceiling", "remote_questions", "git",
   ];
 
   const seen = new Set<string>();

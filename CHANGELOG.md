@@ -6,6 +6,93 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-03-15
+
+### Fixed
+- **URGENT: auto-mode loops on research-slice and plan-slice** — `handleAgentEnd` called `invalidateStateCache()` but not `clearPathCache()` or `clearParseCache()`. The in-process directory listing cache in `paths.ts` retained the pre-subagent empty directory snapshot, so `resolveSliceFile()` returned `null` for artifacts the subagent had just written. This caused `dispatchNextUnit` to re-dispatch the same unit (`research-slice` or `plan-slice`) instead of advancing, incrementing the dispatch counter until the `MAX_UNIT_DISPATCHES=3` limit triggered a hard stop with "Loop detected" (#421)
+
+## [2.11.0] - 2026-03-14
+
+### Added
+- Cross-provider fallback when rate or quota limits are hit (#125)
+- Custom OpenAI-compatible endpoint option in onboarding wizard (#335)
+- Model provider selection in preferences (#350)
+- Auto-mode fallback model rotation on network errors (#386)
+- Native libgit2-backed git read operations for dispatch hotpath (#388)
+
+### Changed
+- Replace hardcoded extension list with dynamic discovery in loader
+- Deduplicate transitive dependency summaries in prompt builders
+- Reduce dispatch gap timeout from 30s to 5s
+- Memoize `deriveState()` per dispatch cycle
+- Wire native batch parser into `deriveState()` hotpath (#389)
+- Add session-scoped directory listing cache and content-hash-keyed parse cache for path resolution
+- Optimize discovery and interactive hot paths
+
+### Fixed
+- Resolve OpenRouter model IDs in auto-mode and show active model per phase
+- Suppress git-svn noise causing confusing errors on affected systems (#404)
+- Include export-html templates in pkg/ shim (#370, #395)
+- Increase timeout for z.ai provider to handle slow API spikes (#379, #396)
+- Prevent login dialog from leaving dangling promises that freeze the UI (#280, #390)
+- Improve Cloud Code Assist 404 error with actionable model guidance (#384)
+- Prevent auto-mode hang when dispatch chain breaks after slice tasks complete (#381, #382)
+- Fix packaging verification and path portability (#378)
+- Read resources from dist/ to prevent branch-drift in npm-link setups (#314)
+- Always use native Anthropic web search when available (#374)
+- CI smoke test — wait for registry propagation, show errors (#383)
+- Bypass pre-commit hooks on GSD infrastructure commits to prevent lint-staged empty commit errors (#385)
+
+## [2.10.12] - 2026-03-14
+
+### Added
+- Multi-milestone readiness flow with per-milestone discussion gate (#377)
+
+### Fixed
+- Fix `npx gsd-pi@latest` failing with `ERR_MODULE_NOT_FOUND: Cannot find package '@gsd/pi-coding-agent'`. The loader now creates workspace package symlinks at runtime before importing, so it works even when `npx` skips postinstall scripts (#380)
+
+## [2.10.11] - 2026-03-14
+
+### Fixed
+- Hoist workspace package dependencies (undici, anthropic SDK, openai, chalk, etc.) into root `dependencies` so they install for end users. v2.10.10 removed `bundleDependencies` but didn't promote the transitive deps (#376)
+- Add `undici` as root dependency to resolve startup crash (#372)
+- Check `GROQ_API_KEY` before entering voice mode to prevent crash (#367)
+
+## [2.10.10] - 2026-03-14
+
+### Added
+- Alibaba Cloud coding-plan provider support (#295)
+- Linux voice mode: Groq Whisper API backend for fast, accurate speech-to-text (#366)
+- Opus 4.6 1M as default model, model selector UX improvements, Discord onboarding (#290)
+
+### Fixed
+- Fix broken `npm install` / `npx gsd-pi@latest` caused by unpublished `@gsd/*` workspace packages leaking into npm dependencies. Workspace cross-references removed from published package metadata; packages resolve via bundled `node_modules/` at runtime (#369)
+- Add pre-publish tarball install validation (`validate-pack`) to CI and publish pipeline, preventing broken packages from reaching npm
+- Handle empty index after runtime file stripping in squash-merge (#364)
+- Add retry logic for transient network/auth failures instead of crashing (#365)
+- Auto-mode: stale lock detection, SIGTERM handler, live-session guard (#362)
+
+## [2.10.9] - 2026-03-14
+
+### Added
+- Team collaboration: multiple users can work on the same repo without milestone name clashes by checking in `.gsd/` planning artifacts (#338)
+
+### Changed
+- Execute-task loop detection uses adaptive reconciliation instead of hard-stopping, reducing false positives (#342)
+- Memory storage switched from better-sqlite3 to sql.js (WASM) for Node 25+ compatibility (#356)
+
+### Fixed
+- Node 22.22+ compatibility: `.ts` import extensions normalized to `.js` for module resolution (#354)
+- Infinite loop when complete-slice merges to main are interrupted (#345)
+- Credential backoff no longer triggers on transport errors; quota exhaustion handled gracefully (#353)
+- OAuth-backed providers (Gemini) no longer crash on quota exhaustion (#347)
+- Secrets skip in auto mode no longer crashes (#352)
+- Untracked runtime files discarded before branch switch to prevent checkout conflicts (#346)
+- TUI crash/corruption on code blocks with lines exceeding terminal width (#343)
+- Infinite skip loop in `gsd auto` broken by adding roadmap completion check
+- Model ID variant suffix stripped correctly for OAuth Anthropic API calls
+- `.gsd/` planning artifacts force-added and `handleAgentEnd` reentrancy guarded (#341)
+
 ## [2.10.8] - 2026-03-14
 
 ### Fixed
@@ -45,11 +132,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Oversized TUI lines now truncated instead of crashing (#287)
 - Anthropic rate limit backoff now respects server-requested retry delay
 - CI publish guard: skip main package publish if already on npm
+- Strip hashline prefixes from TUI read output (#265)
 
 ## [2.10.5] - 2026-03-13
 
+### Added
+- Async background jobs extension for non-blocking task execution (#260)
+- Multi-credential round-robin with rate-limit fallback across API keys
+- Bash interceptor to block commands that duplicate dedicated tools (Read, Write, Edit, Grep, Glob)
+- `gsd update` subcommand for self-update (#273)
+- Task isolation for subagent filesystem safety (#254)
+- Native Rust streaming JSON parser (#266)
+- Web search provider selection added to onboarding wizard (#278)
+
+### Changed
+- Simplified onboarding into two-step auth flow — plain language instead of OAuth jargon (#274)
+
 ### Fixed
 - `optionalDependencies` in published `gsd-pi@2.10.4` were still pinned to `2.10.2`, causing users to install the broken engine binaries that 2.10.4 was meant to fix (#276)
+- Auto-resolve `.gsd/` planning artifact conflicts during slice merge (#264)
+- Use version ranges for native engine optional dependencies (#286)
+- Guard publish against uncommitted version sync changes
+- Show 'keep current' option in config when already authenticated (#283)
+- Restore bashInterceptor settings dropped by async-jobs merge
+- Collapse tool output by default
 
 ## [2.10.4] - 2026-03-13
 
@@ -458,7 +564,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.10.8...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/gsd-build/gsd-2/compare/v2.10.12...v2.11.0
+[2.10.12]: https://github.com/gsd-build/gsd-2/compare/v2.10.11...v2.10.12
+[2.10.11]: https://github.com/gsd-build/gsd-2/compare/v2.10.10...v2.10.11
+[2.10.10]: https://github.com/gsd-build/gsd-2/compare/v2.10.9...v2.10.10
+[2.10.9]: https://github.com/gsd-build/gsd-2/compare/v2.10.8...v2.10.9
 [2.10.8]: https://github.com/gsd-build/gsd-2/compare/v2.10.7...v2.10.8
 [2.10.7]: https://github.com/gsd-build/gsd-2/compare/v2.10.6...v2.10.7
 [2.10.6]: https://github.com/gsd-build/gsd-2/compare/v2.10.5...v2.10.6

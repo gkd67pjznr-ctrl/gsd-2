@@ -16,26 +16,9 @@ import {
   type MergeSliceResult,
   type PreMergeCheckResult,
 } from "../git-service.ts";
+import { createTestContext } from './test-helpers.ts';
 
-let passed = 0;
-let failed = 0;
-
-function assert(condition: boolean, message: string): void {
-  if (condition) passed++;
-  else {
-    failed++;
-    console.error(`  FAIL: ${message}`);
-  }
-}
-
-function assertEq<T>(actual: T, expected: T, message: string): void {
-  if (JSON.stringify(actual) === JSON.stringify(expected)) passed++;
-  else {
-    failed++;
-    console.error(`  FAIL: ${message} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
-
+const { assertEq, assertTrue, report } = createTestContext();
 function run(command: string, cwd: string): string {
   return execSync(command, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" }).trim();
 }
@@ -232,11 +215,11 @@ async function main(): Promise<void> {
     "paths match expected set in order"
   );
 
-  assert(
+  assertTrue(
     RUNTIME_EXCLUSION_PATHS.includes(".gsd/activity/"),
     "includes .gsd/activity/"
   );
-  assert(
+  assertTrue(
     RUNTIME_EXCLUSION_PATHS.includes(".gsd/STATE.md"),
     "includes .gsd/STATE.md"
   );
@@ -247,8 +230,8 @@ async function main(): Promise<void> {
 
   const tempDir = mkdtempSync(join(tmpdir(), "gsd-git-service-test-"));
   run("git init -b main", tempDir);
-  run("git config user.name 'Pi Test'", tempDir);
-  run("git config user.email 'pi@example.com'", tempDir);
+  run('git config user.name "Pi Test"', tempDir);
+  run('git config user.email "pi@example.com"', tempDir);
 
   // runGit should work on a valid repo
   const branch = runGit(tempDir, ["branch", "--show-current"]);
@@ -264,12 +247,12 @@ async function main(): Promise<void> {
     runGit(tempDir, ["log", "--oneline"]);
   } catch (e) {
     threw = true;
-    assert(
+    assertTrue(
       (e as Error).message.includes("git log --oneline failed"),
       "error message includes command and path"
     );
   }
-  assert(threw, "runGit throws without allowFailure on error");
+  assertTrue(threw, "runGit throws without allowFailure on error");
 
   // ─── Type exports compile check ────────────────────────────────────────
 
@@ -279,9 +262,9 @@ async function main(): Promise<void> {
   const _prefs: GitPreferences = { auto_push: true, remote: "origin" };
   const _opts: CommitOptions = { message: "test" };
   const _result: MergeSliceResult = { branch: "main", mergedCommitMessage: "msg", deletedBranch: false };
-  assert(true, "GitPreferences type exported and usable");
-  assert(true, "CommitOptions type exported and usable");
-  assert(true, "MergeSliceResult type exported and usable");
+  assertTrue(true, "GitPreferences type exported and usable");
+  assertTrue(true, "CommitOptions type exported and usable");
+  assertTrue(true, "MergeSliceResult type exported and usable");
 
   // Cleanup T01 temp dir
   rmSync(tempDir, { recursive: true, force: true });
@@ -297,12 +280,12 @@ async function main(): Promise<void> {
   function initTempRepo(): string {
     const dir = mkdtempSync(join(tmpdir(), "gsd-git-t02-"));
     run("git init -b main", dir);
-    run("git config user.name 'Pi Test'", dir);
-    run("git config user.email 'pi@example.com'", dir);
+    run('git config user.name "Pi Test"', dir);
+    run('git config user.email "pi@example.com"', dir);
     // Need an initial commit so HEAD exists
     createFile(dir, ".gitkeep", "");
     run("git add -A", dir);
-    run("git commit -m 'init'", dir);
+    run('git commit -m "init"', dir);
     return dir;
   }
 
@@ -330,22 +313,22 @@ async function main(): Promise<void> {
     assertEq(result, "test: smart staging", "commit returns the commit message");
 
     // Verify only src/code.ts is in the commit
-    const showStat = run("git show --stat --format='' HEAD", repo);
-    assert(showStat.includes("src/code.ts"), "src/code.ts is in the commit");
-    assert(!showStat.includes(".gsd/activity"), ".gsd/activity/ excluded from commit");
-    assert(!showStat.includes(".gsd/runtime"), ".gsd/runtime/ excluded from commit");
-    assert(!showStat.includes("STATE.md"), ".gsd/STATE.md excluded from commit");
-    assert(!showStat.includes("auto.lock"), ".gsd/auto.lock excluded from commit");
-    assert(!showStat.includes("metrics.json"), ".gsd/metrics.json excluded from commit");
-    assert(!showStat.includes(".gsd/worktrees"), ".gsd/worktrees/ excluded from commit");
+    const showStat = run("git show --stat --format= HEAD", repo);
+    assertTrue(showStat.includes("src/code.ts"), "src/code.ts is in the commit");
+    assertTrue(!showStat.includes(".gsd/activity"), ".gsd/activity/ excluded from commit");
+    assertTrue(!showStat.includes(".gsd/runtime"), ".gsd/runtime/ excluded from commit");
+    assertTrue(!showStat.includes("STATE.md"), ".gsd/STATE.md excluded from commit");
+    assertTrue(!showStat.includes("auto.lock"), ".gsd/auto.lock excluded from commit");
+    assertTrue(!showStat.includes("metrics.json"), ".gsd/metrics.json excluded from commit");
+    assertTrue(!showStat.includes(".gsd/worktrees"), ".gsd/worktrees/ excluded from commit");
 
     // Verify runtime files are still untracked
     // git status --short may collapse to "?? .gsd/" or show individual files
     // Use --untracked-files=all to force individual listing
     const statusOut = run("git status --short --untracked-files=all", repo);
-    assert(statusOut.includes(".gsd/activity/"), "activity still untracked after commit");
-    assert(statusOut.includes(".gsd/runtime/"), "runtime still untracked after commit");
-    assert(statusOut.includes(".gsd/STATE.md"), "STATE.md still untracked after commit");
+    assertTrue(statusOut.includes(".gsd/activity/"), "activity still untracked after commit");
+    assertTrue(statusOut.includes(".gsd/runtime/"), "runtime still untracked after commit");
+    assertTrue(statusOut.includes(".gsd/STATE.md"), "STATE.md still untracked after commit");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -384,9 +367,9 @@ async function main(): Promise<void> {
 
     // Verify runtime files are tracked (precondition)
     const tracked = run("git ls-files .gsd/", repo);
-    assert(tracked.includes("metrics.json"), "precondition: metrics.json tracked");
-    assert(tracked.includes("completed-units.json"), "precondition: completed-units.json tracked");
-    assert(tracked.includes("activity/log.jsonl"), "precondition: activity log tracked");
+    assertTrue(tracked.includes("metrics.json"), "precondition: metrics.json tracked");
+    assertTrue(tracked.includes("completed-units.json"), "precondition: completed-units.json tracked");
+    assertTrue(tracked.includes("activity/log.jsonl"), "precondition: activity log tracked");
 
     // Now modify both runtime and real files
     createFile(repo, ".gsd/metrics.json", '{"version":2}');
@@ -397,10 +380,10 @@ async function main(): Promise<void> {
     // autoCommit should commit real.ts. The first call also runs auto-cleanup
     // which removes runtime files from the index via a dedicated commit.
     const msg = svc.autoCommit("execute-task", "M001/S01/T01");
-    assert(msg !== null, "autoCommit produces a commit");
+    assertTrue(msg !== null, "autoCommit produces a commit");
 
     const show = run("git show --stat HEAD", repo);
-    assert(show.includes("src/real.ts"), "real files are committed");
+    assertTrue(show.includes("src/real.ts"), "real files are committed");
 
     // After the commit, runtime files must no longer be in the git index.
     // They remain on disk but are untracked (protected by .gitignore).
@@ -413,13 +396,13 @@ async function main(): Promise<void> {
     createFile(repo, "src/real.ts", "third version");
 
     const msg2 = svc.autoCommit("execute-task", "M001/S01/T02");
-    assert(msg2 !== null, "second autoCommit produces a commit");
+    assertTrue(msg2 !== null, "second autoCommit produces a commit");
 
     const show2 = run("git show --stat HEAD", repo);
-    assert(show2.includes("src/real.ts"), "real files committed in second commit");
-    assert(!show2.includes("metrics"), "metrics.json not in second commit");
-    assert(!show2.includes("completed-units"), "completed-units.json not in second commit");
-    assert(!show2.includes("activity"), "activity not in second commit");
+    assertTrue(show2.includes("src/real.ts"), "real files committed in second commit");
+    assertTrue(!show2.includes("metrics"), "metrics.json not in second commit");
+    assertTrue(!show2.includes("completed-units"), "completed-units.json not in second commit");
+    assertTrue(!show2.includes("activity"), "activity not in second commit");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -454,7 +437,7 @@ async function main(): Promise<void> {
 
     // Verify the commit exists
     const log = run("git log --oneline -1", repo);
-    assert(log.includes("chore(T01): auto-commit after task"), "commit message is in git log");
+    assertTrue(log.includes("chore(T01): auto-commit after task"), "commit message is in git log");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -498,8 +481,8 @@ async function main(): Promise<void> {
 
     // Verify .gsd/ file was NOT committed
     const show = run("git show --stat HEAD", repo);
-    assert(!show.includes("ROADMAP"), ".gsd/ files excluded from pre-switch auto-commit");
-    assert(show.includes("feature.ts"), "non-.gsd/ files included in pre-switch auto-commit");
+    assertTrue(!show.includes("ROADMAP"), ".gsd/ files excluded from pre-switch auto-commit");
+    assertTrue(show.includes("feature.ts"), "non-.gsd/ files included in pre-switch auto-commit");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -543,11 +526,11 @@ async function main(): Promise<void> {
   function initBranchTestRepo(): string {
     const dir = mkdtempSync(join(tmpdir(), "gsd-git-t03-"));
     run("git init -b main", dir);
-    run("git config user.name 'Pi Test'", dir);
-    run("git config user.email 'pi@example.com'", dir);
+    run('git config user.name "Pi Test"', dir);
+    run('git config user.email "pi@example.com"', dir);
     createFile(dir, ".gitkeep", "");
     run("git add -A", dir);
-    run("git commit -m 'init'", dir);
+    run('git commit -m "init"', dir);
     return dir;
   }
 
@@ -596,11 +579,11 @@ async function main(): Promise<void> {
     // master-only repo
     const repo = mkdtempSync(join(tmpdir(), "gsd-git-t03-master-"));
     run("git init -b master", repo);
-    run("git config user.name 'Pi Test'", repo);
-    run("git config user.email 'pi@example.com'", repo);
+    run('git config user.name "Pi Test"', repo);
+    run('git config user.email "pi@example.com"', repo);
     createFile(repo, ".gitkeep", "");
     run("git add -A", repo);
-    run("git commit -m 'init'", repo);
+    run('git commit -m "init"', repo);
 
     const svc = new GitServiceImpl(repo);
     assertEq(svc.getMainBranch(), "master", "getMainBranch returns master when only master exists");
@@ -651,7 +634,7 @@ async function main(): Promise<void> {
     run("git checkout -b developer", repo);
     createFile(repo, ".gsd/milestones/M001/M001-ROADMAP.md", "# Roadmap");
     run("git add -A", repo);
-    run("git commit -m 'add roadmap'", repo);
+    run('git commit -m "add roadmap"', repo);
 
     // ensureSliceBranch from this non-main, non-slice branch
     const created = svc.ensureSliceBranch("M001", "S01");
@@ -660,7 +643,7 @@ async function main(): Promise<void> {
 
     // The roadmap from developer branch should be present
     const logOutput = run("git log --oneline", repo);
-    assert(logOutput.includes("add roadmap"), "slice branch inherits artifacts from working branch");
+    assertTrue(logOutput.includes("add roadmap"), "slice branch inherits artifacts from working branch");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -676,14 +659,14 @@ async function main(): Promise<void> {
     // Create file only on main
     createFile(repo, "main-only.txt", "from main");
     run("git add -A", repo);
-    run("git commit -m 'main-only file'", repo);
+    run('git commit -m "main-only file"', repo);
 
     // Create and check out S01
     svc.ensureSliceBranch("M001", "S01");
     // Add a file only on S01
     createFile(repo, "s01-only.txt", "from s01");
     run("git add -A", repo);
-    run("git commit -m 'S01 work'", repo);
+    run('git commit -m "S01 work"', repo);
 
     // Now create S02 from S01 — should fall back to main
     const created = svc.ensureSliceBranch("M001", "S02");
@@ -692,8 +675,8 @@ async function main(): Promise<void> {
 
     // S02 should NOT have the S01-only file (it branched from main)
     const showFiles = run("git ls-files", repo);
-    assert(!showFiles.includes("s01-only.txt"), "S02 does not have S01-only files (branched from main)");
-    assert(showFiles.includes("main-only.txt"), "S02 has main files");
+    assertTrue(!showFiles.includes("s01-only.txt"), "S02 does not have S01-only files (branched from main)");
+    assertTrue(showFiles.includes("main-only.txt"), "S02 has main files");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -717,11 +700,108 @@ async function main(): Promise<void> {
 
     // The auto-commit on main should have src/feature.ts but NOT runtime files
     run("git checkout main", repo);
-    const showStat = run("git show --stat --format='' HEAD", repo);
-    assert(showStat.includes("src/feature.ts"), "auto-commit includes real files");
-    assert(!showStat.includes(".gsd/activity"), "auto-commit excludes .gsd/activity/ (smart staging)");
-    assert(!showStat.includes("STATE.md"), "auto-commit excludes .gsd/STATE.md (smart staging)");
-    assert(!showStat.includes("metrics.json"), "auto-commit excludes .gsd/metrics.json (smart staging)");
+    const showStat = run("git show --stat --format= HEAD", repo);
+    assertTrue(showStat.includes("src/feature.ts"), "auto-commit includes real files");
+    assertTrue(!showStat.includes(".gsd/activity"), "auto-commit excludes .gsd/activity/ (smart staging)");
+    assertTrue(!showStat.includes("STATE.md"), "auto-commit excludes .gsd/STATE.md (smart staging)");
+    assertTrue(!showStat.includes("metrics.json"), "auto-commit excludes .gsd/metrics.json (smart staging)");
+
+    rmSync(repo, { recursive: true, force: true });
+  }
+
+  // ─── ensureSliceBranch: tracked STATE.md + dirty (regression: "local changes overwritten") ─
+  //
+  // Reproduces: "error: Your local changes to the following files would be overwritten
+  // by checkout: .gsd/STATE.md" that occurred in gsd auto when STATE.md was historically
+  // committed to the repo (before it was added to .gitignore).
+
+  console.log("\n=== ensureSliceBranch: tracked STATE.md + dirty (checkout conflict regression) ===");
+
+  {
+    const repo = initBranchTestRepo();
+    const svc = new GitServiceImpl(repo);
+
+    // Simulate historical state: STATE.md was committed before gitignore was configured
+    createFile(repo, ".gsd/STATE.md", "# State v1");
+    run("git add -f .gsd/STATE.md", repo);
+    run('git commit -m "add state (pre-gitignore)"', repo);
+
+    // STATE.md gets modified during runtime (dirty)
+    createFile(repo, ".gsd/STATE.md", "# State v2 (modified at runtime)");
+
+    // ensureSliceBranch must not fail with "local changes would be overwritten"
+    svc.ensureSliceBranch("M001", "S01");
+    assertEq(svc.getCurrentBranch(), "gsd/M001/S01", "checked out slice branch despite tracked+dirty STATE.md");
+
+    rmSync(repo, { recursive: true, force: true });
+  }
+
+  // ─── ensureSliceBranch: untracked STATE.md blocks checkout (regression: cleanup-commit edge case) ─
+  //
+  // Reproduces: "The following untracked working tree files would be overwritten by checkout:
+  // .gsd/STATE.md" when the smartStage cleanup commit removes STATE.md from the current
+  // branch's HEAD but the target branch was already created from the old HEAD (so it still
+  // has STATE.md tracked). Without discardUntrackedRuntimeFiles(), the untracked STATE.md
+  // on disk would block the checkout.
+
+  console.log("\n=== ensureSliceBranch: untracked runtime files blocked by target branch (cleanup-commit edge case) ===");
+
+  {
+    const repo = initBranchTestRepo();
+
+    // Simulate: STATE.md is tracked in main's HEAD (historical state)
+    createFile(repo, ".gsd/STATE.md", "# State original");
+    run("git add -f .gsd/STATE.md", repo);
+    run('git commit -m "initial with tracked STATE.md"', repo);
+
+    // Simulate what smartStage one-time cleanup does: remove STATE.md from index and commit.
+    // This leaves STATE.md on disk but removes it from main's HEAD.
+    run("git rm --cached .gsd/STATE.md", repo);
+    run('git commit -m "chore: untrack runtime files"', repo);
+
+    // STATE.md exists on disk (modified) but is now untracked in main's HEAD
+    createFile(repo, ".gsd/STATE.md", "# State modified after cleanup");
+
+    // Create slice branch — this is what ensureSliceBranch does internally but we
+    // simulate a GitServiceImpl that has already done the cleanup commit.
+    // The slice branch is created from the OLD HEAD (before cleanup commit) so it HAS
+    // STATE.md tracked. Without discardUntrackedRuntimeFiles(), the checkout would fail.
+    run("git branch gsd/M001/S01 HEAD~1", repo); // branch from HEAD~1 = the commit that had STATE.md
+
+    // Now use GitServiceImpl to switch to the already-existing slice branch
+    const svc = new GitServiceImpl(repo);
+
+    // ensureSliceBranch must succeed despite the untracked STATE.md on disk
+    // conflicting with the tracked STATE.md in the target branch
+    svc.ensureSliceBranch("M001", "S01");
+    assertEq(svc.getCurrentBranch(), "gsd/M001/S01", "checked out slice branch (untracked runtime file removed before checkout)");
+
+    rmSync(repo, { recursive: true, force: true });
+  }
+
+  // ─── switchToMain: tracked STATE.md + dirty (regression) ─────────────
+
+  console.log("\n=== switchToMain: tracked STATE.md + dirty (checkout conflict regression) ===");
+
+  {
+    const repo = initBranchTestRepo();
+    const svc = new GitServiceImpl(repo);
+
+    // Track STATE.md on main (historical pre-gitignore state)
+    createFile(repo, ".gsd/STATE.md", "# State on main");
+    run("git add -f .gsd/STATE.md", repo);
+    run('git commit -m "add state (pre-gitignore)"', repo);
+
+    // Create slice branch (inherits STATE.md from main)
+    svc.ensureSliceBranch("M001", "S01");
+    assertEq(svc.getCurrentBranch(), "gsd/M001/S01", "on slice branch before switchToMain");
+
+    // Modify STATE.md on slice branch (runtime update)
+    createFile(repo, ".gsd/STATE.md", "# State updated on slice branch");
+
+    // switchToMain must not fail with "local changes would be overwritten"
+    svc.switchToMain();
+    assertEq(svc.getCurrentBranch(), svc.getMainBranch(), "back on main after switchToMain despite tracked+dirty STATE.md");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -748,13 +828,13 @@ async function main(): Promise<void> {
 
     // Verify the auto-commit on the slice branch used smart staging
     const sliceLog = run("git log gsd/M001/S01 --oneline -1", repo);
-    assert(sliceLog.includes("pre-switch"), "auto-commit message includes pre-switch");
+    assertTrue(sliceLog.includes("pre-switch"), "auto-commit message includes pre-switch");
 
     // Check that the auto-commit on the slice branch excluded runtime files
-    const showStat = run("git log gsd/M001/S01 -1 --format='' --stat", repo);
-    assert(showStat.includes("src/work.ts"), "switchToMain auto-commit includes real files");
-    assert(!showStat.includes(".gsd/activity"), "switchToMain auto-commit excludes .gsd/activity/");
-    assert(!showStat.includes(".gsd/runtime"), "switchToMain auto-commit excludes .gsd/runtime/");
+    const showStat = run("git log gsd/M001/S01 -1 --format= --stat", repo);
+    assertTrue(showStat.includes("src/work.ts"), "switchToMain auto-commit includes real files");
+    assertTrue(!showStat.includes(".gsd/activity"), "switchToMain auto-commit excludes .gsd/activity/");
+    assertTrue(!showStat.includes(".gsd/runtime"), "switchToMain auto-commit excludes .gsd/runtime/");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -804,15 +884,15 @@ async function main(): Promise<void> {
 
     // Verify commit is on main
     const log = run("git log --oneline -1", repo);
-    assert(log.includes("feat(M001/S01): Implement user authentication"), "merge commit visible in git log");
+    assertTrue(log.includes("feat(M001/S01): Implement user authentication"), "merge commit visible in git log");
 
     // Verify the file is on main
     const files = run("git ls-files", repo);
-    assert(files.includes("src/feature.ts"), "merged file exists on main");
+    assertTrue(files.includes("src/feature.ts"), "merged file exists on main");
 
     // Verify slice branch is deleted
     const branches = run("git branch", repo);
-    assert(!branches.includes("gsd/M001/S01"), "slice branch deleted after merge");
+    assertTrue(!branches.includes("gsd/M001/S01"), "slice branch deleted after merge");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -832,7 +912,7 @@ async function main(): Promise<void> {
     svc.switchToMain();
     const result = svc.mergeSliceToMain("M001", "S02", "Fix broken config");
 
-    assert(result.mergedCommitMessage.startsWith("fix("), "merge commit starts with fix(");
+    assertTrue(result.mergedCommitMessage.startsWith("fix("), "merge commit starts with fix(");
     assertEq(result.mergedCommitMessage, "fix(M001/S02): Fix broken config", "fix merge commit message correct");
 
     rmSync(repo, { recursive: true, force: true });
@@ -853,7 +933,7 @@ async function main(): Promise<void> {
     svc.switchToMain();
     const result = svc.mergeSliceToMain("M001", "S03", "Docs update");
 
-    assert(result.mergedCommitMessage.startsWith("docs("), "merge commit starts with docs(");
+    assertTrue(result.mergedCommitMessage.startsWith("docs("), "merge commit starts with docs(");
     assertEq(result.mergedCommitMessage, "docs(M001/S03): Docs update", "docs merge commit message correct");
 
     rmSync(repo, { recursive: true, force: true });
@@ -874,7 +954,7 @@ async function main(): Promise<void> {
     svc.switchToMain();
     const result = svc.mergeSliceToMain("M001", "S04", "Refactor state management");
 
-    assert(result.mergedCommitMessage.startsWith("refactor("), "merge commit starts with refactor(");
+    assertTrue(result.mergedCommitMessage.startsWith("refactor("), "merge commit starts with refactor(");
     assertEq(result.mergedCommitMessage, "refactor(M001/S04): Refactor state management", "refactor merge commit message correct");
 
     rmSync(repo, { recursive: true, force: true });
@@ -900,10 +980,10 @@ async function main(): Promise<void> {
     } catch (e) {
       threw = true;
       const msg = (e as Error).message;
-      assert(msg.includes("must be called from the main branch"), "error mentions main branch requirement");
-      assert(msg.includes("gsd/M001/S01"), "error includes current branch name");
+      assertTrue(msg.includes("must be called from the main branch"), "error mentions main branch requirement");
+      assertTrue(msg.includes("gsd/M001/S01"), "error includes current branch name");
     }
-    assert(threw, "mergeSliceToMain throws when not on main");
+    assertTrue(threw, "mergeSliceToMain throws when not on main");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -920,10 +1000,10 @@ async function main(): Promise<void> {
     } catch (e) {
       threw = true;
       const msg = (e as Error).message;
-      assert(msg.includes("does not exist"), "error mentions branch does not exist");
-      assert(msg.includes("gsd/M001/S99"), "error includes missing branch name");
+      assertTrue(msg.includes("does not exist"), "error mentions branch does not exist");
+      assertTrue(msg.includes("gsd/M001/S99"), "error includes missing branch name");
     }
-    assert(threw, "mergeSliceToMain throws when branch doesn't exist");
+    assertTrue(threw, "mergeSliceToMain throws when branch doesn't exist");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -945,10 +1025,10 @@ async function main(): Promise<void> {
     } catch (e) {
       threw = true;
       const msg = (e as Error).message;
-      assert(msg.includes("no commits ahead"), "error mentions no commits ahead");
-      assert(msg.includes("gsd/M001/S01"), "error includes branch name");
+      assertTrue(msg.includes("no commits ahead"), "error mentions no commits ahead");
+      assertTrue(msg.includes("gsd/M001/S01"), "error includes branch name");
     }
-    assert(threw, "mergeSliceToMain throws when no commits ahead");
+    assertTrue(threw, "mergeSliceToMain throws when no commits ahead");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -964,27 +1044,27 @@ async function main(): Promise<void> {
     // Create a .gsd/ planning artifact on main (simulates reassess-roadmap)
     createFile(repo, ".gsd/DECISIONS.md", "# Decisions\n\n- D001: Original decision\n");
     run("git add -A", repo);
-    run("git commit -m 'add decisions on main'", repo);
+    run('git commit -m "add decisions on main"', repo);
 
     // Create slice branch and modify the same .gsd/ file differently
     svc.ensureSliceBranch("M001", "S01");
     createFile(repo, ".gsd/DECISIONS.md", "# Decisions\n\n- D001: Original decision\n- D002: New decision from slice\n");
     createFile(repo, "src/feature.ts", "export const x = 1;");
     run("git add -A", repo);
-    run("git commit -m 'slice work with .gsd/ changes'", repo);
+    run('git commit -m "slice work with .gsd/ changes"', repo);
 
     // Back on main, modify the same .gsd/ file to create a conflict
     svc.switchToMain();
     createFile(repo, ".gsd/DECISIONS.md", "# Decisions\n\n- D001: Updated decision on main\n");
     run("git add -A", repo);
-    run("git commit -m 'update decisions on main'", repo);
+    run('git commit -m "update decisions on main"', repo);
 
     // Merge should auto-resolve .gsd/ conflicts by taking theirs (slice branch)
     const result = svc.mergeSliceToMain("M001", "S01", "Feature with .gsd/ conflicts");
     assertEq(result.deletedBranch, true, ".gsd/ conflict auto-resolved: branch deleted");
 
     // Verify the merge succeeded and src file is present
-    assert(existsSync(join(repo, "src/feature.ts")), ".gsd/ conflict auto-resolved: src file merged");
+    assertTrue(existsSync(join(repo, "src/feature.ts")), ".gsd/ conflict auto-resolved: src file merged");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1011,7 +1091,7 @@ async function main(): Promise<void> {
 
     // Verify ref exists under refs/gsd/snapshots/
     const refs = run("git for-each-ref refs/gsd/snapshots/", repo);
-    assert(refs.includes("refs/gsd/snapshots/gsd/M001/S01/"), "snapshot ref created under refs/gsd/snapshots/");
+    assertTrue(refs.includes("refs/gsd/snapshots/gsd/M001/S01/"), "snapshot ref created under refs/gsd/snapshots/");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1046,16 +1126,16 @@ async function main(): Promise<void> {
     // Create package.json with passing test script
     createFile(repo, "package.json", JSON.stringify({
       name: "test-pass",
-      scripts: { test: "node -e 'process.exit(0)'" },
+      scripts: { test: 'node -e "process.exit(0)"' },
     }));
     run("git add -A", repo);
-    run("git commit -m 'add package.json'", repo);
+    run('git commit -m "add package.json"', repo);
 
     const svc = new GitServiceImpl(repo, { pre_merge_check: true });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
 
     assertEq(result.passed, true, "runPreMergeCheck returns passed:true when tests pass");
-    assert(!result.skipped, "runPreMergeCheck is not skipped when enabled");
+    assertTrue(!result.skipped, "runPreMergeCheck is not skipped when enabled");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1069,16 +1149,16 @@ async function main(): Promise<void> {
     // Create package.json with failing test script
     createFile(repo, "package.json", JSON.stringify({
       name: "test-fail",
-      scripts: { test: "node -e 'process.exit(1)'" },
+      scripts: { test: 'node -e "process.exit(1)"' },
     }));
     run("git add -A", repo);
-    run("git commit -m 'add failing package.json'", repo);
+    run('git commit -m "add failing package.json"', repo);
 
     const svc = new GitServiceImpl(repo, { pre_merge_check: true });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
 
     assertEq(result.passed, false, "runPreMergeCheck returns passed:false when tests fail");
-    assert(!result.skipped, "runPreMergeCheck is not skipped when enabled");
+    assertTrue(!result.skipped, "runPreMergeCheck is not skipped when enabled");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1091,10 +1171,10 @@ async function main(): Promise<void> {
     const repo = initBranchTestRepo();
     createFile(repo, "package.json", JSON.stringify({
       name: "test-disabled",
-      scripts: { test: "node -e 'process.exit(1)'" },
+      scripts: { test: 'node -e "process.exit(1)"' },
     }));
     run("git add -A", repo);
-    run("git commit -m 'add package.json'", repo);
+    run('git commit -m "add package.json"', repo);
 
     const svc = new GitServiceImpl(repo, { pre_merge_check: false });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
@@ -1112,11 +1192,11 @@ async function main(): Promise<void> {
   {
     const repo = initBranchTestRepo();
     // Custom command string overrides auto-detection
-    const svc = new GitServiceImpl(repo, { pre_merge_check: "node -e 'process.exit(0)'" });
+    const svc = new GitServiceImpl(repo, { pre_merge_check: 'node -e "process.exit(0)"' });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
 
     assertEq(result.passed, true, "runPreMergeCheck passes with custom command that exits 0");
-    assert(!result.skipped, "custom command is not skipped");
+    assertTrue(!result.skipped, "custom command is not skipped");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1148,21 +1228,21 @@ async function main(): Promise<void> {
     const commitBody = run("git log -1 --format=%B", repo);
 
     // Rich commit should have the subject line
-    assert(commitBody.includes("feat(M001/S01): Implement user authentication"),
+    assertTrue(commitBody.includes("feat(M001/S01): Implement user authentication"),
       "rich commit has conventional subject line");
 
     // Rich commit body should include task list with commit subjects
-    assert(commitBody.includes("add auth module"),
+    assertTrue(commitBody.includes("add auth module"),
       "rich commit body includes first commit subject");
-    assert(commitBody.includes("add login page"),
+    assertTrue(commitBody.includes("add login page"),
       "rich commit body includes second commit subject");
-    assert(commitBody.includes("add session handling"),
+    assertTrue(commitBody.includes("add session handling"),
       "rich commit body includes third commit subject");
 
     // Rich commit body should include Branch: line for forensics
-    assert(commitBody.includes("Branch:"),
+    assertTrue(commitBody.includes("Branch:"),
       "rich commit body includes Branch: line");
-    assert(commitBody.includes("gsd/M001/S01"),
+    assertTrue(commitBody.includes("gsd/M001/S01"),
       "rich commit body Branch: line includes slice branch name");
 
     rmSync(repo, { recursive: true, force: true });
@@ -1193,7 +1273,7 @@ async function main(): Promise<void> {
 
     // Verify the remote has the merge commit
     const remoteLog = run(`git --git-dir=${bareDir} log --oneline -1`, bareDir);
-    assert(remoteLog.includes("Add pushed feature"),
+    assertTrue(remoteLog.includes("Add pushed feature"),
       "auto-push: remote has the merge commit when auto_push is true");
 
     rmSync(repo, { recursive: true, force: true });
@@ -1224,7 +1304,7 @@ async function main(): Promise<void> {
 
     // Remote should NOT have the new merge commit — still at the initial push
     const remoteLog = run(`git --git-dir=${bareDir} log --oneline`, bareDir);
-    assert(!remoteLog.includes("Add unpushed feature"),
+    assertTrue(!remoteLog.includes("Add unpushed feature"),
       "auto-push: remote does NOT have merge commit when auto_push is false");
 
     rmSync(repo, { recursive: true, force: true });
@@ -1246,11 +1326,11 @@ async function main(): Promise<void> {
     // Add a commit to the remote via a temporary clone
     const cloneDir = mkdtempSync(join(tmpdir(), "gsd-git-clone-"));
     run(`git clone ${bareDir} ${cloneDir}`, cloneDir);
-    run("git config user.name 'Remote Dev'", cloneDir);
-    run("git config user.email 'remote@example.com'", cloneDir);
+    run('git config user.name "Remote Dev"', cloneDir);
+    run('git config user.email "remote@example.com"', cloneDir);
     createFile(cloneDir, "remote-file.txt", "from remote");
     run("git add -A", cloneDir);
-    run("git commit -m 'remote commit'", cloneDir);
+    run('git commit -m "remote commit"', cloneDir);
     run("git push origin main", cloneDir);
 
     // ensureSliceBranch should fetch before creating the branch — no crash
@@ -1261,7 +1341,7 @@ async function main(): Promise<void> {
     } catch {
       noError = false;
     }
-    assert(noError, "ensureSliceBranch succeeds when remote has new commits (fetch runs)");
+    assertTrue(noError, "ensureSliceBranch succeeds when remote has new commits (fetch runs)");
 
     rmSync(repo, { recursive: true, force: true });
     rmSync(bareDir, { recursive: true, force: true });
@@ -1283,7 +1363,7 @@ async function main(): Promise<void> {
     } catch {
       noError = false;
     }
-    assert(noError, "ensureSliceBranch succeeds when no remote is configured");
+    assertTrue(noError, "ensureSliceBranch succeeds when no remote is configured");
     assertEq(svc.getCurrentBranch(), "gsd/M001/S01", "branch created even without remote");
 
     rmSync(repo, { recursive: true, force: true });
@@ -1308,8 +1388,8 @@ async function main(): Promise<void> {
 
     // After merge, a snapshot ref should exist (created before merge)
     const refs = run("git for-each-ref refs/gsd/snapshots/", repo);
-    assert(refs.includes("refs/gsd/snapshots/"), "mergeSliceToMain creates snapshot when prefs.snapshots is true");
-    assert(refs.includes("gsd/M001/S01"), "snapshot ref references the slice branch name");
+    assertTrue(refs.includes("refs/gsd/snapshots/"), "mergeSliceToMain creates snapshot when prefs.snapshots is true");
+    assertTrue(refs.includes("gsd/M001/S01"), "snapshot ref references the slice branch name");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1343,21 +1423,21 @@ async function main(): Promise<void> {
 
   {
     // Valid branch names
-    assert(VALID_BRANCH_NAME.test("main"), "VALID_BRANCH_NAME accepts 'main'");
-    assert(VALID_BRANCH_NAME.test("master"), "VALID_BRANCH_NAME accepts 'master'");
-    assert(VALID_BRANCH_NAME.test("develop"), "VALID_BRANCH_NAME accepts 'develop'");
-    assert(VALID_BRANCH_NAME.test("feature/foo"), "VALID_BRANCH_NAME accepts 'feature/foo'");
-    assert(VALID_BRANCH_NAME.test("release-1.0"), "VALID_BRANCH_NAME accepts 'release-1.0'");
-    assert(VALID_BRANCH_NAME.test("my_branch"), "VALID_BRANCH_NAME accepts 'my_branch'");
-    assert(VALID_BRANCH_NAME.test("v2.0.1"), "VALID_BRANCH_NAME accepts 'v2.0.1'");
+    assertTrue(VALID_BRANCH_NAME.test("main"), "VALID_BRANCH_NAME accepts 'main'");
+    assertTrue(VALID_BRANCH_NAME.test("master"), "VALID_BRANCH_NAME accepts 'master'");
+    assertTrue(VALID_BRANCH_NAME.test("develop"), "VALID_BRANCH_NAME accepts 'develop'");
+    assertTrue(VALID_BRANCH_NAME.test("feature/foo"), "VALID_BRANCH_NAME accepts 'feature/foo'");
+    assertTrue(VALID_BRANCH_NAME.test("release-1.0"), "VALID_BRANCH_NAME accepts 'release-1.0'");
+    assertTrue(VALID_BRANCH_NAME.test("my_branch"), "VALID_BRANCH_NAME accepts 'my_branch'");
+    assertTrue(VALID_BRANCH_NAME.test("v2.0.1"), "VALID_BRANCH_NAME accepts 'v2.0.1'");
 
     // Invalid / injection attempts
-    assert(!VALID_BRANCH_NAME.test("main; rm -rf /"), "VALID_BRANCH_NAME rejects shell injection");
-    assert(!VALID_BRANCH_NAME.test("main && echo pwned"), "VALID_BRANCH_NAME rejects && injection");
-    assert(!VALID_BRANCH_NAME.test(""), "VALID_BRANCH_NAME rejects empty string");
-    assert(!VALID_BRANCH_NAME.test("branch name"), "VALID_BRANCH_NAME rejects spaces");
-    assert(!VALID_BRANCH_NAME.test("branch`cmd`"), "VALID_BRANCH_NAME rejects backticks");
-    assert(!VALID_BRANCH_NAME.test("branch$(cmd)"), "VALID_BRANCH_NAME rejects $() subshell");
+    assertTrue(!VALID_BRANCH_NAME.test("main; rm -rf /"), "VALID_BRANCH_NAME rejects shell injection");
+    assertTrue(!VALID_BRANCH_NAME.test("main && echo pwned"), "VALID_BRANCH_NAME rejects && injection");
+    assertTrue(!VALID_BRANCH_NAME.test(""), "VALID_BRANCH_NAME rejects empty string");
+    assertTrue(!VALID_BRANCH_NAME.test("branch name"), "VALID_BRANCH_NAME rejects spaces");
+    assertTrue(!VALID_BRANCH_NAME.test("branch`cmd`"), "VALID_BRANCH_NAME rejects backticks");
+    assertTrue(!VALID_BRANCH_NAME.test("branch$(cmd)"), "VALID_BRANCH_NAME rejects $() subshell");
   }
 
   // ─── getMainBranch: configured main_branch preference ──────────────────
@@ -1405,7 +1485,7 @@ async function main(): Promise<void> {
 
   {
     const _checkResult: PreMergeCheckResult = { passed: true, skipped: false };
-    assert(true, "PreMergeCheckResult type exported and usable");
+    assertTrue(true, "PreMergeCheckResult type exported and usable");
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -1559,7 +1639,7 @@ async function main(): Promise<void> {
     run("git checkout -b f-123-new-thing", repo);
     createFile(repo, "setup.txt", "initial setup");
     run("git add -A", repo);
-    run("git commit -m 'initial feature setup'", repo);
+    run('git commit -m "initial feature setup"', repo);
 
     // Record integration branch (this is what auto.ts does at startup)
     writeIntegrationBranch(repo, "M001", "f-123-new-thing");
@@ -1577,7 +1657,7 @@ async function main(): Promise<void> {
 
     // The slice branch should have the feature branch's commit
     const log = run("git log --oneline", repo);
-    assert(log.includes("initial feature setup"), "e2e: slice branch inherits feature branch content");
+    assertTrue(log.includes("initial feature setup"), "e2e: slice branch inherits feature branch content");
 
     // Do work on the slice branch
     createFile(repo, "src/feature.ts", "export const feature = true;");
@@ -1594,12 +1674,12 @@ async function main(): Promise<void> {
 
     // The feature branch should have the merged work
     const files = run("git ls-files", repo);
-    assert(files.includes("src/feature.ts"), "e2e: merged file exists on feature branch");
+    assertTrue(files.includes("src/feature.ts"), "e2e: merged file exists on feature branch");
 
     // Main should NOT have the merged work
     run("git checkout main", repo);
     const mainFiles = run("git ls-files", repo);
-    assert(!mainFiles.includes("src/feature.ts"), "e2e: main does NOT have merged work — it stays on the feature branch");
+    assertTrue(!mainFiles.includes("src/feature.ts"), "e2e: main does NOT have merged work — it stays on the feature branch");
 
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1672,8 +1752,8 @@ async function main(): Promise<void> {
 
     // Precondition: runtime files are tracked
     const trackedBefore = run("git ls-files .gsd/", repo);
-    assert(trackedBefore.includes("completed-units.json"), "untrack: precondition — completed-units tracked");
-    assert(trackedBefore.includes("metrics.json"), "untrack: precondition — metrics tracked");
+    assertTrue(trackedBefore.includes("completed-units.json"), "untrack: precondition — completed-units tracked");
+    assertTrue(trackedBefore.includes("metrics.json"), "untrack: precondition — metrics tracked");
 
     // Run untrackRuntimeFiles
     untrackRuntimeFiles(repo);
@@ -1684,24 +1764,22 @@ async function main(): Promise<void> {
 
     // Non-runtime files remain tracked
     const srcTracked = run("git ls-files src.ts", repo);
-    assert(srcTracked.includes("src.ts"), "untrack: non-runtime files remain tracked");
+    assertTrue(srcTracked.includes("src.ts"), "untrack: non-runtime files remain tracked");
 
     // Files still exist on disk
-    assert(existsSync(join(repo, ".gsd", "completed-units.json")),
+    assertTrue(existsSync(join(repo, ".gsd", "completed-units.json")),
       "untrack: completed-units.json still on disk");
-    assert(existsSync(join(repo, ".gsd", "metrics.json")),
+    assertTrue(existsSync(join(repo, ".gsd", "metrics.json")),
       "untrack: metrics.json still on disk");
 
     // Idempotent — running again doesn't error
     untrackRuntimeFiles(repo);
-    assert(true, "untrack: second call is idempotent (no error)");
+    assertTrue(true, "untrack: second call is idempotent (no error)");
 
     rmSync(repo, { recursive: true, force: true });
   }
 
-  console.log(`\nResults: ${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
-  console.log("All tests passed ✓");
+  report();
 }
 
 main().catch((error) => {

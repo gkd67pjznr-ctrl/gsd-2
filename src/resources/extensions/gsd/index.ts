@@ -39,6 +39,8 @@ import {
   loadEffectiveGSDPreferences,
   renderPreferencesForSystemPrompt,
   resolveAllSkillReferences,
+  resolveModelWithFallbacksForUnit,
+  getNextFallbackModel,
 } from "./preferences.js";
 import { hasSkillSnapshot, detectNewSkills, formatSkillsXml } from "./skill-discovery.js";
 import {
@@ -60,7 +62,7 @@ export function isDepthVerified(): boolean {
 }
 
 // ── Write-gate: block CONTEXT.md writes during discussion without depth verification ──
-const MILESTONE_CONTEXT_RE = /M\d+-CONTEXT\.md$/;
+const MILESTONE_CONTEXT_RE = /M\d+(?:-[a-z0-9]{6})?-CONTEXT\.md$/;
 
 export function shouldBlockContextWrite(
   toolName: string,
@@ -339,12 +341,71 @@ export default function (pi: ExtensionAPI) {
         "errorMessage" in lastMsg && lastMsg.errorMessage
           ? `: ${lastMsg.errorMessage}`
           : "";
+
+      const dash = getAutoDashboardData();
+      if (dash.currentUnit) {
+        const modelConfig = resolveModelWithFallbacksForUnit(dash.currentUnit.type);
+        if (modelConfig && modelConfig.fallbacks.length > 0) {
+          const availableModels = ctx.modelRegistry.getAvailable();
+          const currentModelId = ctx.model?.id;
+
+          const nextModelId = getNextFallbackModel(currentModelId, modelConfig);
+
+          if (nextModelId) {
+            let modelToSet;
+            const slashIdx = nextModelId.indexOf("/");
+            if (slashIdx !== -1) {
+              const provider = nextModelId.substring(0, slashIdx);
+              const id = nextModelId.substring(slashIdx + 1);
+              modelToSet = availableModels.find(
+                m => m.provider.toLowerCase() === provider.toLowerCase()
+                  && m.id.toLowerCase() === id.toLowerCase()
+              );
+            } else {
+              const currentProvider = ctx.model?.provider;
+              const exactProviderMatch = availableModels.find(
+                m => m.id === nextModelId && m.provider === currentProvider
+              );
+              modelToSet = exactProviderMatch ?? availableModels.find(m => m.id === nextModelId);
+            }
+
+            if (modelToSet) {
+              const ok = await pi.setModel(modelToSet, { persist: false });
+              if (ok) {
+                ctx.ui.notify(`Model error${errorDetail}. Switched to fallback: ${nextModelId} and resuming.`, "warning");
+                // Trigger a generic "Continue execution" to resume the task since the previous attempt failed
+                pi.sendMessage(
+                  { customType: "gsd-auto-timeout-recovery", content: "Continue execution.", display: false },
+                  { triggerTurn: true }
+                );
+                return;
+              }
+            }
+          }
+        }
+      }
+
       (ctx as any).log(`Auto-mode paused due to provider error${errorDetail}`);
       await pauseAuto(ctx, pi);
       return;
     }
 
-    await handleAgentEnd(ctx, pi);
+    try {
+      await handleAgentEnd(ctx, pi);
+    } catch (err) {
+      // Safety net: if handleAgentEnd throws despite its internal try-catch,
+      // ensure auto-mode stops gracefully instead of silently stalling (#381).
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(
+        `Auto-mode error in agent_end handler: ${message}. Stopping auto-mode.`,
+        "error",
+      );
+      try {
+        await pauseAuto(ctx, pi);
+      } catch {
+        // Last resort — at least log
+      }
+    }
   });
 
   // ── session_before_compact ────────────────────────────────────────────────
@@ -481,13 +542,13 @@ export default function (pi: ExtensionAPI) {
 }
 
 async function buildGuidedExecuteContextInjection(prompt: string, basePath: string): Promise<string | null> {
-  const executeMatch = prompt.match(/Execute the next task:\s+(T\d+)\s+\("([^"]+)"\)\s+in slice\s+(S\d+)\s+of milestone\s+(M\d+)/i);
+  const executeMatch = prompt.match(/Execute the next task:\s+(T\d+)\s+\("([^"]+)"\)\s+in slice\s+(S\d+)\s+of milestone\s+(M\d+(?:-[a-z0-9]{6})?)/i);
   if (executeMatch) {
     const [, taskId, taskTitle, sliceId, milestoneId] = executeMatch;
     return buildTaskExecutionContextInjection(basePath, milestoneId, sliceId, taskId, taskTitle);
   }
 
-  const resumeMatch = prompt.match(/Resume interrupted work\.[\s\S]*?slice\s+(S\d+)\s+of milestone\s+(M\d+)/i);
+  const resumeMatch = prompt.match(/Resume interrupted work\.[\s\S]*?slice\s+(S\d+)\s+of milestone\s+(M\d+(?:-[a-z0-9]{6})?)/i);
   if (resumeMatch) {
     const [, sliceId, milestoneId] = resumeMatch;
     const state = await deriveState(basePath);

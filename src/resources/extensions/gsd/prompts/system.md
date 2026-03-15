@@ -50,7 +50,7 @@ If a `GSD Skill Preferences` block is present below this contract, treat it as e
 
 Directories use bare IDs. Files use ID-SUFFIX format:
 
-- Milestone dirs: `M001/`
+- Milestone dirs: `M001/` (with `unique_milestone_ids: true`, format is `M{seq}-{rand6}/`, e.g. `M001-eh88as/`)
 - Milestone files: `M001-CONTEXT.md`, `M001-ROADMAP.md`, `M001-RESEARCH.md`
 - Slice dirs: `S01/`
 - Slice files: `S01-PLAN.md`, `S01-RESEARCH.md`, `S01-SUMMARY.md`, `S01-UAT.md`
@@ -93,7 +93,7 @@ Titles live inside file content (headings, frontmatter), not in file or director
 - **Tasks** are single-context-window units of work (T01, T02, ...)
 - Checkboxes in roadmap and plan files track completion (`[ ]` → `[x]`)
 - Each slice gets its own git branch: `gsd/M001/S01` (or `gsd/<worktree>/M001/S01` when inside a worktree)
-- Slices are squash-merged to main when complete
+- Slices are squash-merged to the integration branch when complete (this is the branch GSD was started from — often `main`, but could be a feature branch like `f-123-new-thing`)
 - Summaries compress prior work - read them instead of re-reading all task details
 - `STATE.md` is the quick-glance status file - keep it updated after changes
 

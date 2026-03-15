@@ -248,6 +248,13 @@ export class AuthStorage {
 	 */
 	private credentialBackoff: Map<string, Map<number, number>> = new Map();
 
+	/**
+	 * Provider-level backoff tracking.
+	 * Set when all credentials for a provider are backed off.
+	 * Map<provider, backoffExpiresAt>
+	 */
+	private providerBackoff: Map<string, number> = new Map();
+
 	private constructor(private storage: AuthStorageBackend) {
 		this.reload();
 	}
@@ -398,6 +405,7 @@ export class AuthStorage {
 		delete this.data[provider];
 		this.providerRoundRobinIndex.delete(provider);
 		this.credentialBackoff.delete(provider);
+		this.providerBackoff.delete(provider);
 		this.persistProviderChange(provider, undefined);
 	}
 
@@ -471,6 +479,57 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Returns true when the provider has credentials configured but all of them
+	 * are currently in a backoff window (e.g. rate-limited or quota exhausted).
+	 * Returns false when there are no credentials or at least one is available.
+	 */
+	areAllCredentialsBackedOff(provider: string): boolean {
+		const credentials = this.getCredentialsForProvider(provider);
+		if (credentials.length === 0) return false;
+		for (let i = 0; i < credentials.length; i++) {
+			if (!this.isCredentialBackedOff(provider, i)) return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Mark an entire provider as exhausted.
+	 * Called when all credentials for a provider are backed off.
+	 */
+	markProviderExhausted(provider: string, errorType: UsageLimitErrorType): void {
+		const backoffMs = getBackoffDuration(errorType);
+		this.providerBackoff.set(provider, Date.now() + backoffMs);
+	}
+
+	/**
+	 * Check if a provider is currently available (not backed off at provider level).
+	 */
+	isProviderAvailable(provider: string): boolean {
+		const expiresAt = this.providerBackoff.get(provider);
+		if (expiresAt === undefined) return true;
+		if (Date.now() >= expiresAt) {
+			this.providerBackoff.delete(provider);
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Get milliseconds remaining until provider backoff expires.
+	 * Returns 0 if provider is available.
+	 */
+	getProviderBackoffRemaining(provider: string): number {
+		const expiresAt = this.providerBackoff.get(provider);
+		if (expiresAt === undefined) return 0;
+		const remaining = expiresAt - Date.now();
+		if (remaining <= 0) {
+			this.providerBackoff.delete(provider);
+			return 0;
+		}
+		return remaining;
+	}
+
+	/**
 	 * Check if a credential index is currently backed off.
 	 */
 	private isCredentialBackedOff(provider: string, index: number): boolean {
@@ -535,6 +594,14 @@ export class AuthStorage {
 		if (credentials.length === 0) return false;
 
 		const errorType = options?.errorType ?? "rate_limit";
+
+		// For unknown/transport errors (e.g. connection reset, "terminated"),
+		// don't back off the only credential — it would make getApiKey() return
+		// undefined and surface a misleading "Authentication failed" message.
+		if (errorType === "unknown" && credentials.length === 1) {
+			return false;
+		}
+
 		const backoffMs = getBackoffDuration(errorType);
 
 		// Determine which credential was just used (same logic as selectCredentialIndex

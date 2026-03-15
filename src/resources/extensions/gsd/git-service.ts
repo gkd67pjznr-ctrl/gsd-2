@@ -16,7 +16,15 @@ import {
   detectWorktreeName,
   getSliceBranchName,
   SLICE_BRANCH_RE,
-} from "./worktree.ts";
+} from "./worktree.js";
+import {
+  nativeGetCurrentBranch,
+  nativeDetectMainBranch,
+  nativeBranchExists,
+  nativeHasMergeConflicts,
+  nativeHasChanges,
+  nativeCommitCountBetween,
+} from "./native-git-bridge.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -98,6 +106,22 @@ export const RUNTIME_EXCLUSION_PATHS: readonly string[] = [
   ".gsd/STATE.md",
 ];
 
+/**
+ * GSD planning artifact paths that must be force-added even when .gsd/
+ * is in .gitignore. These are durable planning files that the agent writes
+ * and that must survive squash-merges to main.
+ *
+ * `git add --force` is a no-op when the path doesn't exist or has no
+ * changes, so this list is safe to apply unconditionally.
+ */
+const GSD_DURABLE_PATHS: readonly string[] = [
+  ".gsd/milestones/",
+  ".gsd/DECISIONS.md",
+  ".gsd/QUEUE.md",
+  ".gsd/PROJECT.md",
+  ".gsd/REQUIREMENTS.md",
+];
+
 // ─── Integration Branch Metadata ───────────────────────────────────────────
 
 /**
@@ -170,7 +194,7 @@ export function writeIntegrationBranch(basePath: string, milestoneId: string, br
   // commit, the metadata would be lost on the first branch switch.
   try {
     runGit(basePath, ["add", "--force", metaFile]);
-    runGit(basePath, ["commit", "-F", "-"], {
+    runGit(basePath, ["commit", "--no-verify", "-F", "-"], {
       input: `chore(${milestoneId}): record integration branch`,
     });
   } catch {
@@ -181,12 +205,26 @@ export function writeIntegrationBranch(basePath: string, milestoneId: string, br
 
 // ─── Git Helper ────────────────────────────────────────────────────────────
 
-/** Env overlay that suppresses all interactive git credential prompts. */
+/** Env overlay that suppresses interactive git credential prompts and git-svn noise. */
 const GIT_NO_PROMPT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: "0",
   GIT_ASKPASS: "",
+  GIT_SVN_ID: "",
 };
+
+/**
+ * Strip git-svn noise from error messages.
+ * Some systems (notably Arch Linux) have a buggy git-svn Perl module that
+ * emits warnings on every git invocation, confusing users. See #404.
+ */
+function filterGitSvnNoise(message: string): string {
+  return message
+    .replace(/Duplicate specification "[^"]*" for option "[^"]*"\n?/g, "")
+    .replace(/Unable to determine upstream SVN information from .*\n?/g, "")
+    .replace(/Perhaps the repository is empty\. at .*git-svn.*\n?/g, "")
+    .trim();
+}
 
 /**
  * Run a git command in the given directory.
@@ -205,7 +243,7 @@ export function runGit(basePath: string, args: string[], options: { allowFailure
   } catch (error) {
     if (options.allowFailure) return "";
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`git ${args.join(" ")} failed in ${basePath}: ${message}`);
+    throw new Error(`git ${args.join(" ")} failed in ${basePath}: ${filterGitSvnNoise(message)}`);
   }
 }
 
@@ -275,7 +313,7 @@ export class GitServiceImpl {
         if (result && result.includes("rm '")) cleaned = true;
       }
       if (cleaned) {
-        this.git(["commit", "-F", "-"], { input: "chore: untrack .gsd/ runtime files from git index" });
+        this.git(["commit", "--no-verify", "-F", "-"], { input: "chore: untrack .gsd/ runtime files from git index" });
       }
       this._runtimeFilesCleanedUp = true;
     }
@@ -291,6 +329,21 @@ export class GitServiceImpl {
     // git reset HEAD silently succeeds when the path isn't staged, so no
     // error handling is needed per-path.
     this.git(["add", "-A"]);
+
+    // Force-add GSD planning artifacts that live under .gsd/ but may be
+    // blocked by a .gsd/ gitignore pattern. `git add -A` respects .gitignore,
+    // so new files (CONTEXT.md, SUMMARY.md, PLAN.md, etc.) in gitignored
+    // directories are silently skipped. Without this force-add, planning
+    // artifacts are never committed — they exist on disk but not in git.
+    // Squash-merges then delete them on main because they appear as "removed
+    // relative to main" during the merge.
+    //
+    // Only force-add durable planning paths — runtime paths are excluded
+    // by the reset step below.
+    for (const durablePath of GSD_DURABLE_PATHS) {
+      this.git(["add", "--force", "--", durablePath], { allowFailure: true });
+    }
+
     for (const exclusion of allExclusions) {
       this.git(["reset", "HEAD", "--", exclusion], { allowFailure: true });
     }
@@ -312,7 +365,7 @@ export class GitServiceImpl {
     if (!staged && !opts.allowEmpty) return null;
 
     this.git(
-      ["commit", "-F", "-", ...(opts.allowEmpty ? ["--allow-empty"] : [])],
+      ["commit", "--no-verify", "-F", "-", ...(opts.allowEmpty ? ["--allow-empty"] : [])],
       { input: opts.message },
     );
     return opts.message;
@@ -325,8 +378,8 @@ export class GitServiceImpl {
    */
   autoCommit(unitType: string, unitId: string, extraExclusions: readonly string[] = []): string | null {
     // Quick check: is there anything dirty at all?
-    const status = this.git(["status", "--short"], { allowFailure: true });
-    if (!status) return null;
+    // Native path uses libgit2 (single syscall), fallback spawns git.
+    if (!nativeHasChanges(this.basePath)) return null;
 
     this.smartStage(extraExclusions);
 
@@ -336,25 +389,27 @@ export class GitServiceImpl {
     if (!staged) return null;
 
     const message = `chore(${unitId}): auto-commit after ${unitType}`;
-    this.git(["commit", "-F", "-"], { input: message });
+    this.git(["commit", "--no-verify", "-F", "-"], { input: message });
     return message;
   }
 
   // ─── Branch Queries ────────────────────────────────────────────────────
 
   /**
-   * Get the "main" (integration) branch for this repo.
+   * Get the integration branch for this repo — the branch that slice
+   * branches are created from and merged back into.
+   *
+   * This is often `main` or `master`, but not necessarily. When a user
+   * starts GSD on a feature branch like `f-123-new-thing`, that branch
+   * is recorded as the integration target, and all slice branches merge
+   * back into it — not the repo's default branch. The name "main branch"
+   * in variable names is historical; think of it as "integration branch".
    *
    * Resolution order:
    * 1. Explicit `main_branch` preference (user override, highest priority)
    * 2. Milestone integration branch from metadata file (recorded at milestone start)
    * 3. Worktree base branch (worktree/<name>)
    * 4. origin/HEAD symbolic-ref → main/master fallback → current branch
-   *
-   * The integration branch (step 2) is what makes feature-branch workflows
-   * work correctly: when a user starts GSD on `f-123-new-thing`, that branch
-   * is recorded as the integration target, and all slice branches merge back
-   * to it instead of the repo's default branch.
    */
   getMainBranch(): string {
     // Explicit preference takes priority (double-check validity as defense-in-depth)
@@ -367,37 +422,25 @@ export class GitServiceImpl {
       const integrationBranch = readIntegrationBranch(this.basePath, this._milestoneId);
       if (integrationBranch) {
         // Verify the branch still exists locally (could have been deleted)
-        const exists = this.git(["show-ref", "--verify", `refs/heads/${integrationBranch}`], { allowFailure: true });
-        if (exists) return integrationBranch;
+        if (nativeBranchExists(this.basePath, integrationBranch)) return integrationBranch;
       }
     }
 
     const wtName = detectWorktreeName(this.basePath);
     if (wtName) {
       const wtBranch = `worktree/${wtName}`;
-      const exists = this.git(["show-ref", "--verify", `refs/heads/${wtBranch}`], { allowFailure: true });
-      if (exists) return wtBranch;
-      return this.git(["branch", "--show-current"]);
+      if (nativeBranchExists(this.basePath, wtBranch)) return wtBranch;
+      return nativeGetCurrentBranch(this.basePath);
     }
 
-    const symbolic = this.git(["symbolic-ref", "refs/remotes/origin/HEAD"], { allowFailure: true });
-    if (symbolic) {
-      const match = symbolic.match(/refs\/remotes\/origin\/(.+)$/);
-      if (match) return match[1]!;
-    }
-
-    const mainExists = this.git(["show-ref", "--verify", "refs/heads/main"], { allowFailure: true });
-    if (mainExists) return "main";
-
-    const masterExists = this.git(["show-ref", "--verify", "refs/heads/master"], { allowFailure: true });
-    if (masterExists) return "master";
-
-    return this.git(["branch", "--show-current"]);
+    // Repo-level default detection: origin/HEAD → main → master → current branch.
+    // Native path uses libgit2 (single call), fallback spawns multiple git processes.
+    return nativeDetectMainBranch(this.basePath);
   }
 
-  /** Get the current branch name. */
+  /** Get the current branch name. Native libgit2 when available, execSync fallback. */
   getCurrentBranch(): string {
-    return this.git(["branch", "--show-current"]);
+    return nativeGetCurrentBranch(this.basePath);
   }
 
   /** True if currently on a GSD slice branch. */
@@ -419,23 +462,18 @@ export class GitServiceImpl {
   // ─── Branch Lifecycle ──────────────────────────────────────────────────
 
   /**
-   * Check if a local branch exists.
+   * Check if a local branch exists. Native libgit2 when available, execSync fallback.
    */
   private branchExists(branch: string): boolean {
-    try {
-      this.git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-      return true;
-    } catch {
-      return false;
-    }
+    return nativeBranchExists(this.basePath, branch);
   }
 
   /**
    * Ensure the slice branch exists and is checked out.
    *
    * Creates the branch from the current working branch if it's not a slice
-   * branch (preserves planning artifacts). Falls back to main when on another
-   * slice branch (avoids chaining slice branches).
+   * branch (preserves planning artifacts). Falls back to the integration
+   * branch when on another slice branch (avoids chaining slice branches).
    *
    * Auto-commits dirty state via smart staging before checkout so runtime
    * files are never accidentally committed during branch switches.
@@ -470,7 +508,7 @@ export class GitServiceImpl {
       }
 
       // Branch from current when it's a normal working branch (not a slice).
-      // If already on a slice branch, fall back to main to avoid chaining.
+      // If already on a slice branch, fall back to the integration branch to avoid chaining.
       const mainBranch = this.getMainBranch();
       const base = SLICE_BRANCH_RE.test(current) ? mainBranch : current;
       this.git(["branch", branch, base]);
@@ -491,17 +529,20 @@ export class GitServiceImpl {
     this.autoCommit("pre-switch", current, [".gsd/"]);
 
     // Discard uncommitted .gsd/ changes so checkout doesn't fail.
-    // These are runtime files (metrics, completed-units, STATE) that were
-    // intentionally excluded from the commit above. If they remain dirty,
-    // git checkout refuses when the target branch has different versions.
+    // Two-step approach handles both tracked and untracked runtime files:
+    // 1. `checkout --` reverts tracked .gsd/ files to their HEAD versions.
+    // 2. `clean -fdx` removes untracked runtime files that the target branch has
+    //    tracked — e.g., when a prior cleanup commit removed STATE.md from the
+    //    current branch's HEAD but the target branch still has it committed.
     this.git(["checkout", "--", ".gsd/"], { allowFailure: true });
+    this.discardUntrackedRuntimeFiles();
 
     this.git(["checkout", branch]);
     return created;
   }
 
   /**
-   * Switch to main, auto-committing dirty state via smart staging first.
+   * Switch to the integration branch, auto-committing dirty state via smart staging first.
    */
   switchToMain(): void {
     const mainBranch = this.getMainBranch();
@@ -512,9 +553,29 @@ export class GitServiceImpl {
     this.autoCommit("pre-switch", current, [".gsd/"]);
 
     // Discard uncommitted .gsd/ changes so checkout doesn't fail.
+    // Two-step approach handles both tracked and untracked runtime files.
     this.git(["checkout", "--", ".gsd/"], { allowFailure: true });
+    this.discardUntrackedRuntimeFiles();
 
     this.git(["checkout", mainBranch]);
+  }
+
+  /**
+   * Remove untracked runtime files from the working tree.
+   *
+   * Complements `git checkout -- .gsd/` (which only handles tracked files).
+   * Runtime files can end up untracked after a cleanup commit removes them
+   * from the current branch's HEAD — but the target branch may still have
+   * them committed. Without this step, `git checkout` fails with:
+   *   "The following untracked working tree files would be overwritten by checkout"
+   *
+   * `git clean -fdx` is safe here because:
+   * - Only removes *untracked* files (tracked files are untouched)
+   * - Targets only the specific runtime paths listed in RUNTIME_EXCLUSION_PATHS
+   * - These files are always regenerated by GSD on the next run
+   */
+  private discardUntrackedRuntimeFiles(): void {
+    this.git(["clean", "-fdx", "--", ...RUNTIME_EXCLUSION_PATHS], { allowFailure: true });
   }
 
   // ─── S05 Features ─────────────────────────────────────────────────────
@@ -623,18 +684,21 @@ export class GitServiceImpl {
   }
 
   /**
-   * Squash-merge a slice branch into main and delete it.
+   * Squash-merge a slice branch into the integration branch and delete it.
+   *
+   * The integration branch is resolved by getMainBranch() — this may be
+   * `main`, a feature branch, or a worktree branch depending on context.
    *
    * Flow: snapshot branch HEAD → squash merge → rich commit via stdin →
    * auto-push (if enabled) → delete branch.
    *
-   * Must be called from the main branch. Uses `inferCommitType(sliceTitle)`
+   * Must be called from the integration branch. Uses `inferCommitType(sliceTitle)`
    * for the conventional commit type instead of hardcoding `feat`.
    *
    * Throws when:
-   * - Not currently on the main branch
+   * - Not currently on the integration branch
    * - The slice branch does not exist
-   * - The slice branch has no commits ahead of main
+   * - The slice branch has no commits ahead of the integration branch
    */
   mergeSliceToMain(milestoneId: string, sliceId: string, sliceTitle: string): MergeSliceResult {
     const mainBranch = this.getMainBranch();
@@ -656,9 +720,9 @@ export class GitServiceImpl {
       );
     }
 
-    // Check commits ahead
-    const aheadCount = this.git(["rev-list", "--count", `${mainBranch}..${branch}`]);
-    if (aheadCount === "0") {
+    // Check commits ahead — native libgit2 revwalk when available
+    const aheadCount = nativeCommitCountBetween(this.basePath, mainBranch, branch);
+    if (aheadCount === 0) {
       throw new Error(
         `Slice branch "${branch}" has no commits ahead of "${mainBranch}". Nothing to merge.`,
       );
@@ -684,7 +748,7 @@ export class GitServiceImpl {
     }
     const untrackDiff = this.git(["diff", "--cached", "--stat"], { allowFailure: true });
     if (untrackDiff && untrackDiff.trim()) {
-      this.git(["commit", "-m", "chore: untrack .gsd/ runtime files before merge"], { allowFailure: true });
+      this.git(["commit", "--no-verify", "-m", "chore: untrack .gsd/ runtime files before merge"], { allowFailure: true });
     }
 
     // Merge slice branch — strategy is configurable via git.merge_strategy
@@ -780,12 +844,20 @@ export class GitServiceImpl {
     }
 
     if (strategy === "squash") {
-      this.git(["commit", "-F", "-"], { input: message });
+      // After stripping runtime files, there may be nothing left to commit.
+      // This happens when the only changes in the slice were runtime artifacts.
+      const stagedDiff = this.git(["diff", "--cached", "--stat"], { allowFailure: true });
+      if (stagedDiff?.trim()) {
+        this.git(["commit", "--no-verify", "-F", "-"], { input: message });
+      } else {
+        // Nothing to commit — clean up the squash-merge state
+        this.git(["reset", "HEAD"], { allowFailure: true });
+      }
     } else {
       // --no-ff already committed; amend to include runtime file removal
       const runtimeDiff = this.git(["diff", "--cached", "--stat"], { allowFailure: true });
       if (runtimeDiff?.trim()) {
-        this.git(["commit", "--amend", "--no-edit"]);
+        this.git(["commit", "--amend", "--no-edit", "--no-verify"]);
       }
     }
 

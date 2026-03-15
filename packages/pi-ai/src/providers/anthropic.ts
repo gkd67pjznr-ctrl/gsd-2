@@ -452,6 +452,9 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 			for (const block of output.content) delete (block as any).index;
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			if (model.provider === "alibaba-coding-plan") {
+				output.errorMessage = `[alibaba-coding-plan] ${output.errorMessage}`;
+			}
 			if (error instanceof Anthropic.APIError && error.headers) {
 				const retryAfterMs = extractRetryAfterMs(error.headers, error.message);
 				if (retryAfterMs !== undefined) {
@@ -583,8 +586,10 @@ function createClient(
 		return { client, isOAuthToken: false };
 	}
 
-	const betaFeatures = ["fine-grained-tool-streaming-2025-05-14"];
-	if (needsInterleavedBeta) {
+	// Skip beta headers for providers that don't support them (e.g., Alibaba Coding Plan)
+	const skipBetaHeaders = model.provider === "alibaba-coding-plan";
+	const betaFeatures = skipBetaHeaders ? [] : ["fine-grained-tool-streaming-2025-05-14"];
+	if (needsInterleavedBeta && !skipBetaHeaders) {
 		betaFeatures.push("interleaved-thinking-2025-05-14");
 	}
 
@@ -599,7 +604,7 @@ function createClient(
 				{
 					accept: "application/json",
 					"anthropic-dangerous-direct-browser-access": "true",
-					"anthropic-beta": `claude-code-20250219,oauth-2025-04-20,${betaFeatures.join(",")}`,
+					...(betaFeatures.length > 0 ? { "anthropic-beta": `claude-code-20250219,oauth-2025-04-20,${betaFeatures.join(",")}` } : {}),
 					"user-agent": `claude-cli/${claudeCodeVersion}`,
 					"x-app": "cli",
 				},
@@ -612,15 +617,18 @@ function createClient(
 	}
 
 	// API key auth
+	// Alibaba Coding Plan uses Bearer token auth instead of x-api-key
+	const isAlibabaProvider = model.provider === "alibaba-coding-plan";
 	const client = new Anthropic({
-		apiKey,
+		apiKey: isAlibabaProvider ? null : apiKey,
+		authToken: isAlibabaProvider ? apiKey : undefined,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
 		defaultHeaders: mergeHeaders(
 			{
 				accept: "application/json",
 				"anthropic-dangerous-direct-browser-access": "true",
-				"anthropic-beta": betaFeatures.join(","),
+				...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
 			},
 			model.headers,
 			optionsHeaders,
@@ -637,8 +645,12 @@ function buildParams(
 	options?: AnthropicOptions,
 ): MessageCreateParamsStreaming {
 	const { cacheControl } = getCacheControl(model.baseUrl, options?.cacheRetention);
+	// For OAuth (Claude Max/Pro), strip variant suffixes like [1m] from model ID.
+	// The API only accepts the base model ID (e.g. "claude-opus-4-6"),
+	// not internal variant identifiers (e.g. "claude-opus-4-6[1m]").
+	const apiModelId = isOAuthToken ? model.id.replace(/\[.*\]$/, "") : model.id;
 	const params: MessageCreateParamsStreaming = {
-		model: model.id,
+		model: apiModelId,
 		messages: convertMessages(context.messages, model, isOAuthToken, cacheControl),
 		max_tokens: options?.maxTokens || (model.maxTokens / 3) | 0,
 		stream: true,

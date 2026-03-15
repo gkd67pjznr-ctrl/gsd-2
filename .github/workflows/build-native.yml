@@ -175,13 +175,8 @@ jobs:
       - name: Verify dist exists
         run: test -s dist/loader.js || { echo "::error::dist/loader.js missing or empty after build"; exit 1; }
 
-      - name: Verify tarball contents
-        run: |
-          npm pack --dry-run --ignore-scripts 2>&1 | tee /tmp/pack-output.txt
-          grep -q "dist/loader.js" /tmp/pack-output.txt || {
-            echo "::error::dist/loader.js not in tarball"
-            exit 1
-          }
+      - name: Validate package is installable
+        run: npm run validate-pack
 
       - name: Publish main package
         env:
@@ -200,10 +195,47 @@ jobs:
       - name: Post-publish smoke test
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          sleep 15
           TMPDIR=$(mktemp -d)
           cd "$TMPDIR"
-          npm init -y
-          npm install "gsd-pi@${VERSION}"
-          npx gsd --version
-          echo "Published package is functional"
+          npm init -y > /dev/null 2>&1
+
+          # Wait for npm registry to show the new version (metadata propagation)
+          echo "Waiting for gsd-pi@${VERSION} to appear on npm..."
+          for attempt in $(seq 1 20); do
+            PUBLISHED=$(npm view "gsd-pi@${VERSION}" version 2>/dev/null || echo "")
+            if [ "${PUBLISHED}" = "${VERSION}" ]; then
+              echo "  ✓ Version ${VERSION} visible on npm (attempt ${attempt})"
+              break
+            fi
+            if [ "$attempt" = "20" ]; then
+              echo "::warning::gsd-pi@${VERSION} not visible on npm after 5 minutes — skipping smoke test"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          # Now install and verify
+          echo "Installing gsd-pi@${VERSION}..."
+          for attempt in 1 2 3; do
+            if npm install "gsd-pi@${VERSION}" 2>&1 | tee /tmp/install-output.txt; then
+              echo "  ✓ Install succeeded"
+              # Run version check via node directly (npx may resolve wrong binary)
+              # Strip ANSI escape codes and match version on any line (--version prints a banner)
+              RAW=$(node node_modules/gsd-pi/dist/loader.js --version 2>&1 || echo "FAILED")
+              ACTUAL=$(echo "$RAW" | sed 's/\x1b\[[0-9;]*m//g' | grep -oE "^${VERSION}$" | head -1)
+              if [ "$ACTUAL" = "$VERSION" ]; then
+                echo "  ✓ gsd --version = ${VERSION}"
+                echo "Published package is functional"
+                exit 0
+              else
+                echo "::error::Version mismatch: expected ${VERSION} in output:"
+                echo "$RAW"
+                exit 1
+              fi
+            fi
+            echo "Install attempt ${attempt}/3 failed, retrying in 15s..."
+            cat /tmp/install-output.txt
+            sleep 15
+          done
+          echo "::error::Smoke test failed — gsd-pi@${VERSION} not installable"
+          exit 1

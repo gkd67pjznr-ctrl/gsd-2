@@ -12,17 +12,17 @@
  * Flow:
  *   1. ensureSliceBranch() — create + checkout slice branch
  *   2. agent does work, commits
- *   3. mergeSliceToMain() — checkout main, squash-merge, delete branch
+ *   3. mergeSliceToMain() — checkout integration branch, squash-merge, delete slice branch
  */
 
 import { sep } from "node:path";
 
-import { GitServiceImpl, writeIntegrationBranch } from "./git-service.ts";
-import { loadEffectiveGSDPreferences } from "./preferences.ts";
+import { GitServiceImpl, writeIntegrationBranch } from "./git-service.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 // Re-export MergeSliceResult from the canonical source (D014 — type-only re-export)
-export type { MergeSliceResult } from "./git-service.ts";
-export { MergeConflictError } from "./git-service.ts";
+export type { MergeSliceResult } from "./git-service.js";
+export { MergeConflictError } from "./git-service.js";
 
 // ─── Lazy GitServiceImpl Cache ─────────────────────────────────────────────
 
@@ -72,11 +72,12 @@ export function captureIntegrationBranch(basePath: string, milestoneId: string):
  * Returns null if not inside a GSD worktree (.gsd/worktrees/<name>/).
  */
 export function detectWorktreeName(basePath: string): string | null {
-  const marker = `${sep}.gsd${sep}worktrees${sep}`;
-  const idx = basePath.indexOf(marker);
+  const normalizedPath = basePath.replaceAll("\\", "/");
+  const marker = "/.gsd/worktrees/";
+  const idx = normalizedPath.indexOf(marker);
   if (idx === -1) return null;
-  const afterMarker = basePath.slice(idx + marker.length);
-  const name = afterMarker.split(sep)[0] ?? afterMarker.split("/")[0];
+  const afterMarker = normalizedPath.slice(idx + marker.length);
+  const name = afterMarker.split("/")[0];
   return name || null;
 }
 
@@ -98,7 +99,7 @@ export function getSliceBranchName(milestoneId: string, sliceId: string, worktre
 }
 
 /** Regex that matches both plain and worktree-namespaced slice branches. */
-export const SLICE_BRANCH_RE = /^gsd\/(?:([a-zA-Z0-9_-]+)\/)?(M\d+)\/(S\d+)$/;
+export const SLICE_BRANCH_RE = /^gsd\/(?:([a-zA-Z0-9_-]+)\/)?(M\d+(?:-[a-z0-9]{6})?)\/(S\d+)$/;
 
 /**
  * Parse a slice branch name into its components.
@@ -163,16 +164,16 @@ export function autoCommitCurrentBranch(
 }
 
 /**
- * Switch to main, auto-committing any dirty files on the current branch first.
+ * Switch to the integration branch, auto-committing any dirty files on the current branch first.
  */
 export function switchToMain(basePath: string): void {
   getService(basePath).switchToMain();
 }
 
 /**
- * Squash-merge a completed slice branch to main.
- * Expects to already be on main (call switchToMain first).
- * Deletes the branch after merge.
+ * Squash-merge a completed slice branch into the integration branch.
+ * Expects to already be on the integration branch (call switchToMain first).
+ * Deletes the slice branch after merge.
  */
 export function mergeSliceToMain(
   basePath: string, milestoneId: string, sliceId: string, sliceTitle: string,

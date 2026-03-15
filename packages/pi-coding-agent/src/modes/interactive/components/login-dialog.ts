@@ -1,3 +1,5 @@
+// GSD Login Dialog Component — OAuth login flow UI
+// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 import { getOAuthProviders } from "@gsd/pi-ai/oauth";
 import { Container, type Focusable, getEditorKeybindings, Input, Spacer, Text, type TUI } from "@gsd/pi-tui";
 import { exec } from "child_process";
@@ -6,7 +8,12 @@ import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
 
 /**
- * Login dialog component - replaces editor during OAuth login flow
+ * Login dialog component - replaces editor during OAuth login flow.
+ *
+ * Guards against stuck UI by:
+ * - Rejecting any outstanding promise before creating a new one
+ * - Listening on the internal AbortSignal so external cancellation cleans up
+ * - Exposing a public dispose() method so the caller can force-cleanup
  */
 export class LoginDialogComponent extends Container implements Focusable {
 	private contentContainer: Container;
@@ -15,6 +22,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	private abortController = new AbortController();
 	private inputResolver?: (value: string) => void;
 	private inputRejecter?: (error: Error) => void;
+	private disposed = false;
 
 	// Focusable implementation - propagate to input for IME cursor positioning
 	private _focused = false;
@@ -62,20 +70,49 @@ export class LoginDialogComponent extends Container implements Focusable {
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
+
+		// Wire abort signal so external cancellation rejects pending promises
+		this.abortController.signal.addEventListener("abort", () => {
+			this.rejectPending("Login cancelled");
+		});
 	}
 
 	get signal(): AbortSignal {
 		return this.abortController.signal;
 	}
 
-	private cancel(): void {
-		this.abortController.abort();
+	/**
+	 * Reject any outstanding input promise without triggering a full cancel.
+	 * Safe to call multiple times.
+	 */
+	private rejectPending(reason: string): void {
 		if (this.inputRejecter) {
-			this.inputRejecter(new Error("Login cancelled"));
+			const rejecter = this.inputRejecter;
 			this.inputResolver = undefined;
 			this.inputRejecter = undefined;
+			rejecter(new Error(reason));
 		}
+	}
+
+	private cancel(): void {
+		if (this.disposed) return;
+		this.abortController.abort();
+		// rejectPending is also called by the abort listener, but guard with
+		// disposed flag and nulling to avoid double-reject
+		this.rejectPending("Login cancelled");
 		this.onComplete(false, "Login cancelled");
+	}
+
+	/**
+	 * Force-dispose the dialog, rejecting any pending promises.
+	 * Called by the parent when restoring the editor, as a safety net
+	 * to ensure no promises are left dangling.
+	 */
+	dispose(): void {
+		if (this.disposed) return;
+		this.disposed = true;
+		this.abortController.abort();
+		this.rejectPending("Login dialog disposed");
 	}
 
 	/**
@@ -106,6 +143,9 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Show input for manual code/URL entry (for callback server providers)
 	 */
 	showManualInput(prompt: string): Promise<string> {
+		// Reject any previous pending promise before creating a new one
+		this.rejectPending("Superseded by new input prompt");
+
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
 		this.contentContainer.addChild(this.input);
@@ -123,6 +163,9 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Note: Does NOT clear content, appends to existing (preserves URL from showAuth)
 	 */
 	showPrompt(message: string, placeholder?: string): Promise<string> {
+		// Reject any previous pending promise before creating a new one
+		this.rejectPending("Superseded by new input prompt");
+
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("text", message), 1, 0));
 		if (placeholder) {
@@ -161,6 +204,8 @@ export class LoginDialogComponent extends Container implements Focusable {
 	}
 
 	handleInput(data: string): void {
+		if (this.disposed) return;
+
 		const kb = getEditorKeybindings();
 
 		if (kb.matches(data, "selectCancel")) {

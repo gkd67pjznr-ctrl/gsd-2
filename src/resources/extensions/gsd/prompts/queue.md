@@ -1,5 +1,18 @@
 {{preamble}}
 
+## Draft Awareness
+
+Drafts are milestones that were identified during a prior multi-milestone discussion where the user chose "Needs own discussion" instead of "Ready for auto-planning." A `CONTEXT-DRAFT.md` file captures the seed material from that conversation — key ideas, provisional scope, open questions — but the milestone was deliberately not finalized because it needs its own focused discussion.
+
+Before asking "What do you want to add?", check the existing milestones context below. If any milestone is marked **"Draft context available"**, surface these drafts to the user first:
+
+1. Tell the user which milestones have draft contexts and briefly summarize what each draft contains (read the draft file).
+2. Use `ask_user_questions` to ask per-draft milestone:
+   - **"Discuss now"** — Treat this draft as the primary topic. Read the draft content, use it as seed material, and conduct a focused discussion following the standard discussion flow (reflection → investigation → questioning → depth verification → requirements → roadmap). After the discussion, write the full CONTEXT.md and delete the `CONTEXT-DRAFT.md` file. The milestone is then ready for auto-planning.
+   - **"Leave for later"** — Keep the draft as-is. The user will discuss it in a future session. Auto-mode will continue to pause when it reaches this milestone.
+3. Handle all draft discussions before proceeding to new queue work.
+4. If no drafts exist in the context, skip this section entirely and proceed to "What do you want to add?"
+
 Say exactly: "What do you want to add?" — nothing else. Wait for the user's answer.
 
 ## Discussion Phase
@@ -69,7 +82,7 @@ Determine where the new milestones should go in the overall sequence. Consider d
 Once the user is satisfied, in a single pass for **each** new milestone (starting from {{nextId}}):
 
 1. `mkdir -p .gsd/milestones/<ID>/slices`
-2. Write `.gsd/milestones/<ID>/<ID>-CONTEXT.md` — read the template at `~/.gsd/agent/extensions/gsd/templates/context.md` first. Capture intent, scope, risks, constraints, integration points, and relevant requirements. Mark the status as "Queued — pending auto-mode execution."
+2. Write `.gsd/milestones/<ID>/<ID>-CONTEXT.md` — use the **Context** output template below. Capture intent, scope, risks, constraints, integration points, and relevant requirements. Mark the status as "Queued — pending auto-mode execution."
 
 Then, after all milestone directories and context files are written:
 
@@ -83,3 +96,5 @@ Then, after all milestone directories and context files are written:
 **Do NOT update `.gsd/STATE.md`.**
 
 After writing the files and committing, say exactly: "Queued N milestone(s). Auto-mode will pick them up after current work completes." — nothing else.
+
+{{inlinedTemplates}}

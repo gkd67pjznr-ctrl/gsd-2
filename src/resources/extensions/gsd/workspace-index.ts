@@ -1,18 +1,17 @@
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { loadFile, parsePlan, parseRoadmap } from "./files.ts";
+import { loadFile, parsePlan, parseRoadmap } from "./files.js";
 import {
-  milestonesDir,
   resolveMilestoneFile,
   resolveSliceFile,
   resolveSlicePath,
   resolveTaskFile,
   resolveTasksDir,
-} from "./paths.ts";
-import { deriveState } from "./state.ts";
-import { type ValidationIssue, validateCompleteBoundary, validatePlanBoundary } from "./observability-validator.ts";
-import { getSliceBranchName, detectWorktreeName } from "./worktree.ts";
+} from "./paths.js";
+import { deriveState } from "./state.js";
+import { milestoneIdSort, findMilestoneIds } from "./guided-flow.js";
+import { type ValidationIssue, validateCompleteBoundary, validatePlanBoundary } from "./observability-validator.js";
+import { getSliceBranchName, detectWorktreeName } from "./worktree.js";
 
 export interface WorkspaceTaskTarget {
   id: string;
@@ -59,23 +58,10 @@ export interface GSDWorkspaceIndex {
   validationIssues: ValidationIssue[];
 }
 
-function findMilestoneIds(basePath: string): string[] {
-  try {
-    return readdirSync(milestonesDir(basePath), { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => {
-        const match = entry.name.match(/^(M\d+)/);
-        return match ? match[1] : entry.name;
-      })
-      .sort();
-  } catch {
-    return [];
-  }
-}
 
 function titleFromRoadmapHeader(content: string, fallbackId: string): string {
   const roadmap = parseRoadmap(content);
-  return roadmap.title.replace(/^M\d+[^:]*:\s*/, "") || fallbackId;
+  return roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, "") || fallbackId;
 }
 
 async function indexSlice(basePath: string, milestoneId: string, sliceId: string, fallbackTitle: string, done: boolean): Promise<WorkspaceSliceTarget> {

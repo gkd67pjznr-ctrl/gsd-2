@@ -2382,6 +2382,24 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 			}
+
+			case "fallback_provider_switch": {
+				this.showStatus(`Switched from ${event.from} → ${event.to} (${event.reason})`);
+				this.ui.requestRender();
+				break;
+			}
+
+			case "fallback_provider_restored": {
+				this.showStatus(`Restored to ${event.provider}`);
+				this.ui.requestRender();
+				break;
+			}
+
+			case "fallback_chain_exhausted": {
+				this.showError(event.reason);
+				this.ui.requestRender();
+				break;
+			}
 		}
 	}
 
@@ -3805,8 +3823,10 @@ export class InteractiveMode {
 			manualCodeReject = reject;
 		});
 
-		// Restore editor helper
+		// Restore editor helper — also disposes the dialog to reject any
+		// dangling promises and prevent the UI from getting stuck.
 		const restoreEditor = () => {
+			dialog.dispose();
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
@@ -3881,8 +3901,14 @@ export class InteractiveMode {
 			this.showStatus(`Logged in to ${providerName}. Credentials saved to ${getAuthPath()}`);
 		} catch (error: unknown) {
 			restoreEditor();
+			// Also reject the manual code promise if it's still pending
+			if (manualCodeReject) {
+				manualCodeReject(new Error("Login cancelled"));
+				manualCodeReject = undefined;
+				manualCodeResolve = undefined;
+			}
 			const errorMsg = error instanceof Error ? error.message : String(error);
-			if (errorMsg !== "Login cancelled") {
+			if (errorMsg !== "Login cancelled" && !errorMsg.includes("Superseded") && !errorMsg.includes("disposed")) {
 				this.showError(`Failed to login to ${providerName}: ${errorMsg}`);
 			}
 		}
