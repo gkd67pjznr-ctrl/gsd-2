@@ -297,6 +297,9 @@ let currentUnit: { type: string; id: string; startedAt: number } | null = null;
 /** Track dynamic routing decision for the current unit (for metrics) */
 let currentUnitRouting: { tier: string; modelDowngraded: boolean } | null = null;
 
+/** Queue of quick-task captures awaiting dispatch after triage resolution */
+let pendingQuickTasks: import("./captures.js").CaptureEntry[] = [];
+
 /**
  * Model captured at auto-mode start. Used to prevent model bleed between
  * concurrent GSD instances sharing the same global settings.json (#650).
@@ -629,6 +632,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   currentMilestoneId = null;
   originalBasePath = "";
   completedUnits = [];
+  pendingQuickTasks = [];
   clearSliceProgressCache();
   clearActivityLogState();
   resetProactiveHealing();
@@ -998,6 +1002,7 @@ export async function startAuto(
   autoStartTime = Date.now();
   resourceSyncedAtOnStart = readResourceSyncedAt();
   completedUnits = [];
+  pendingQuickTasks = [];
   currentUnit = null;
   currentMilestoneId = state.activeMilestone?.id ?? null;
   originalModelId = ctx.model?.id ?? null;
@@ -1297,6 +1302,53 @@ export async function handleAgentEnd(
       }
     }
 
+    // ── Post-triage: execute actionable resolutions (inject, replan, queue quick-tasks) ──
+    // After a triage-captures unit completes, the LLM has classified captures and
+    // updated CAPTURES.md. Now we execute those classifications: inject tasks into
+    // the plan, write replan triggers, and queue quick-tasks for dispatch.
+    if (currentUnit.type === "triage-captures") {
+      try {
+        const { executeTriageResolutions } = await import("./triage-resolution.js");
+        const state = await deriveState(basePath);
+        const mid = state.activeMilestone?.id;
+        const sid = state.activeSlice?.id;
+
+        if (mid && sid) {
+          const triageResult = executeTriageResolutions(basePath, mid, sid);
+
+          if (triageResult.injected > 0) {
+            ctx.ui.notify(
+              `Triage: injected ${triageResult.injected} task${triageResult.injected === 1 ? "" : "s"} into ${sid} plan.`,
+              "info",
+            );
+          }
+          if (triageResult.replanned > 0) {
+            ctx.ui.notify(
+              `Triage: replan trigger written for ${sid} — next dispatch will enter replanning.`,
+              "info",
+            );
+          }
+          if (triageResult.quickTasks.length > 0) {
+            // Queue quick-tasks for dispatch. They'll be picked up by the
+            // quick-task dispatch block below the triage check.
+            for (const qt of triageResult.quickTasks) {
+              pendingQuickTasks.push(qt);
+            }
+            ctx.ui.notify(
+              `Triage: ${triageResult.quickTasks.length} quick-task${triageResult.quickTasks.length === 1 ? "" : "s"} queued for execution.`,
+              "info",
+            );
+          }
+          for (const action of triageResult.actions) {
+            process.stderr.write(`gsd-triage: ${action}\n`);
+          }
+        }
+      } catch (err) {
+        // Non-fatal — triage resolution failure shouldn't block dispatch
+        process.stderr.write(`gsd-triage: resolution execution failed: ${(err as Error).message}\n`);
+      }
+    }
+
     // ── Path A fix: verify artifact and persist completion before re-entering dispatch ──
     // After doctor + rebuildState, check whether the just-completed unit actually
     // produced its expected artifact. If so, persist the completion key now so the
@@ -1548,6 +1600,85 @@ export async function handleAgentEnd(
       }
     } catch {
       // Triage check failure is non-fatal — proceed to normal dispatch
+    }
+  }
+
+  // ── Quick-task dispatch: execute queued quick-tasks from triage resolution ──
+  // Quick-tasks are self-contained one-off tasks that don't modify the plan.
+  // They're queued during post-triage resolution and dispatched here one at a time.
+  if (
+    !stepMode &&
+    pendingQuickTasks.length > 0 &&
+    currentUnit &&
+    currentUnit.type !== "quick-task"
+  ) {
+    try {
+      const capture = pendingQuickTasks.shift()!;
+      const { buildQuickTaskPrompt } = await import("./triage-resolution.js");
+      const { markCaptureExecuted } = await import("./captures.js");
+      const prompt = buildQuickTaskPrompt(capture);
+
+      ctx.ui.notify(
+        `Executing quick-task: ${capture.id} — "${capture.text}"`,
+        "info",
+      );
+
+      // Close out previous unit metrics
+      if (currentUnit) {
+        const modelId = ctx.model?.id ?? "unknown";
+        snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+        saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+      }
+
+      // Dispatch quick-task as a new unit
+      const qtUnitType = "quick-task";
+      const qtUnitId = `${currentMilestoneId}/${capture.id}`;
+      const qtStartedAt = Date.now();
+      currentUnit = { type: qtUnitType, id: qtUnitId, startedAt: qtStartedAt };
+      writeUnitRuntimeRecord(basePath, qtUnitType, qtUnitId, qtStartedAt, {
+        phase: "dispatched",
+        wrapupWarningSent: false,
+        timeoutAt: null,
+        lastProgressAt: qtStartedAt,
+        progressCount: 0,
+        lastProgressKind: "dispatch",
+      });
+      const state = await deriveState(basePath);
+      updateProgressWidget(ctx, qtUnitType, qtUnitId, state);
+
+      const result = await cmdCtx!.newSession();
+      if (result.cancelled) {
+        await stopAuto(ctx, pi);
+        return;
+      }
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      writeLock(lockBase(), qtUnitType, qtUnitId, completedUnits.length, sessionFile);
+
+      // Mark capture as executed now that the unit is dispatched
+      markCaptureExecuted(basePath, capture.id);
+
+      // Start unit timeout for quick-task
+      clearUnitTimeout();
+      const supervisor = resolveAutoSupervisorConfig();
+      const qtTimeoutMs = (supervisor.hard_timeout_minutes ?? 30) * 60 * 1000;
+      unitTimeoutHandle = setTimeout(async () => {
+        unitTimeoutHandle = null;
+        if (!active) return;
+        ctx.ui.notify(
+          `Quick-task ${capture.id} exceeded timeout. Pausing auto-mode.`,
+          "warning",
+        );
+        await pauseAuto(ctx, pi);
+      }, qtTimeoutMs);
+
+      if (!active) return;
+      pi.sendMessage(
+        { customType: "gsd-auto", content: prompt, display: verbose },
+        { triggerTurn: true },
+      );
+      return; // handleAgentEnd will fire again when quick-task session completes
+    } catch {
+      // Non-fatal — proceed to normal dispatch
     }
   }
 
@@ -3168,6 +3299,7 @@ export async function dispatchHookUnit(
     autoStartTime = Date.now();
     currentUnit = null;
     completedUnits = [];
+    pendingQuickTasks = [];
   }
 
   const hookUnitType = `hook/${hookName}`;

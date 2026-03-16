@@ -222,3 +222,123 @@ test("dashboard: overlay labels triage-captures and quick-task unit types", () =
     "unitLabel should handle quick-task",
   );
 });
+
+// ─── Post-triage resolution execution ─────────────────────────────────────────
+
+test("dispatch: post-triage resolution executor fires after triage-captures unit", () => {
+  const triageCompletionBlock = autoSrc.slice(
+    autoSrc.indexOf("Post-triage: execute actionable resolutions"),
+    autoSrc.indexOf("Path A fix: verify artifact"),
+  );
+  assert.ok(
+    triageCompletionBlock.includes('currentUnit.type === "triage-captures"'),
+    "should check for triage-captures unit completion",
+  );
+  assert.ok(
+    triageCompletionBlock.includes("executeTriageResolutions"),
+    "should call executeTriageResolutions",
+  );
+});
+
+test("dispatch: post-triage executor handles inject results", () => {
+  const triageCompletionBlock = autoSrc.slice(
+    autoSrc.indexOf("Post-triage: execute actionable resolutions"),
+    autoSrc.indexOf("Path A fix: verify artifact"),
+  );
+  assert.ok(
+    triageCompletionBlock.includes("triageResult.injected"),
+    "should check injected count",
+  );
+});
+
+test("dispatch: post-triage executor handles replan results", () => {
+  const triageCompletionBlock = autoSrc.slice(
+    autoSrc.indexOf("Post-triage: execute actionable resolutions"),
+    autoSrc.indexOf("Path A fix: verify artifact"),
+  );
+  assert.ok(
+    triageCompletionBlock.includes("triageResult.replanned"),
+    "should check replanned count",
+  );
+});
+
+test("dispatch: post-triage executor queues quick-tasks", () => {
+  const triageCompletionBlock = autoSrc.slice(
+    autoSrc.indexOf("Post-triage: execute actionable resolutions"),
+    autoSrc.indexOf("Path A fix: verify artifact"),
+  );
+  assert.ok(
+    triageCompletionBlock.includes("pendingQuickTasks"),
+    "should push quick-tasks to pendingQuickTasks queue",
+  );
+});
+
+// ─── Quick-task dispatch ──────────────────────────────────────────────────────
+
+test("dispatch: quick-task dispatch block exists after triage check", () => {
+  const quickTaskBlock = autoSrc.indexOf("Quick-task dispatch: execute queued quick-tasks");
+  const triageBlock = autoSrc.indexOf("Triage check: dispatch triage unit");
+  const stepModeBlock = autoSrc.indexOf("In step mode, pause and show a wizard");
+
+  assert.ok(quickTaskBlock > 0, "quick-task dispatch block should exist");
+  assert.ok(
+    quickTaskBlock > triageBlock,
+    "quick-task dispatch should come after triage check",
+  );
+  assert.ok(
+    quickTaskBlock < stepModeBlock,
+    "quick-task dispatch should come before step mode check",
+  );
+});
+
+test("dispatch: quick-task dispatch uses buildQuickTaskPrompt", () => {
+  const quickTaskSection = autoSrc.slice(
+    autoSrc.indexOf("Quick-task dispatch: execute queued quick-tasks"),
+    autoSrc.indexOf("In step mode, pause and show a wizard"),
+  );
+  assert.ok(
+    quickTaskSection.includes("buildQuickTaskPrompt"),
+    "should call buildQuickTaskPrompt for quick-task dispatch",
+  );
+});
+
+test("dispatch: quick-task dispatch marks capture as executed", () => {
+  const quickTaskSection = autoSrc.slice(
+    autoSrc.indexOf("Quick-task dispatch: execute queued quick-tasks"),
+    autoSrc.indexOf("In step mode, pause and show a wizard"),
+  );
+  assert.ok(
+    quickTaskSection.includes("markCaptureExecuted"),
+    "should mark capture as executed after dispatch",
+  );
+});
+
+test("dispatch: quick-task dispatch uses early-return pattern", () => {
+  const quickTaskSection = autoSrc.slice(
+    autoSrc.indexOf("Quick-task dispatch: execute queued quick-tasks"),
+    autoSrc.indexOf("In step mode, pause and show a wizard"),
+  );
+  assert.ok(
+    quickTaskSection.includes("return; // handleAgentEnd will fire again when quick-task session completes"),
+    "quick-task dispatch should return after sending message",
+  );
+});
+
+// ─── Post-unit hook exclusion for quick-task ──────────────────────────────────
+
+test("dispatch: quick-task excluded from post-unit hook triggering", () => {
+  assert.ok(
+    hooksSrc.includes('"quick-task"'),
+    "post-unit-hooks.ts should reference quick-task",
+  );
+});
+
+// ─── pendingQuickTasks queue lifecycle ────────────────────────────────────────
+
+test("dispatch: pendingQuickTasks queue is reset on auto-mode start/stop", () => {
+  const resetMatches = autoSrc.match(/pendingQuickTasks = \[\]/g);
+  assert.ok(
+    resetMatches && resetMatches.length >= 3,
+    "pendingQuickTasks should be reset in at least 3 places (start, stop, manual hook)",
+  );
+});

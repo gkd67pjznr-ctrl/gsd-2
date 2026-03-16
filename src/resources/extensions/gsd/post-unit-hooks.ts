@@ -60,7 +60,8 @@ export function checkPostUnitHooks(
 
   // Don't trigger hooks for other hook units (prevent hook-on-hook chains)
   // Don't trigger hooks for triage units (prevent hook-on-triage chains)
-  if (completedUnitType.startsWith("hook/") || completedUnitType === "triage-captures") return null;
+  // Don't trigger hooks for quick-task units (lightweight one-offs from captures)
+  if (completedUnitType.startsWith("hook/") || completedUnitType === "triage-captures" || completedUnitType === "quick-task") return null;
 
   // Check if any hooks are configured for this unit type
   const hooks = resolvePostUnitHooks().filter(h =>

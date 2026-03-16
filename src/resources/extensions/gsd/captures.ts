@@ -26,6 +26,7 @@ export interface CaptureEntry {
   resolution?: string;
   rationale?: string;
   resolvedAt?: string;
+  executed?: boolean;
 }
 
 export interface TriageResult {
@@ -211,6 +212,52 @@ export function markCaptureResolved(
   writeFileSync(filePath, updated, "utf-8");
 }
 
+/**
+ * Mark a resolved capture as executed — its resolution action was carried out.
+ * Appends `**Executed:** <timestamp>` to the capture's section in CAPTURES.md.
+ */
+export function markCaptureExecuted(basePath: string, captureId: string): void {
+  const filePath = resolveCapturesPath(basePath);
+  if (!existsSync(filePath)) return;
+
+  const content = readFileSync(filePath, "utf-8");
+  const executedAt = new Date().toISOString();
+
+  const sectionRegex = new RegExp(
+    `(### ${escapeRegex(captureId)}\\n(?:(?!### ).)*?)(?=### |$)`,
+    "s",
+  );
+  const match = sectionRegex.exec(content);
+  if (!match) return;
+
+  let section = match[1];
+
+  // Remove any existing Executed field (in case of re-execution)
+  section = section.replace(/\*\*Executed:\*\*\s*.+\n?/g, "");
+
+  // Append Executed timestamp
+  section = section.trimEnd() + "\n" + `**Executed:** ${executedAt}` + "\n";
+
+  const updated = content.replace(sectionRegex, section);
+  writeFileSync(filePath, updated, "utf-8");
+}
+
+/**
+ * Load resolved captures that have actionable classifications (inject, replan,
+ * quick-task) but have NOT yet been executed.
+ * These are captures whose resolutions need to be carried out.
+ */
+export function loadActionableCaptures(basePath: string): CaptureEntry[] {
+  return loadAllCaptures(basePath).filter(
+    c =>
+      c.status === "resolved" &&
+      !c.executed &&
+      (c.classification === "inject" ||
+        c.classification === "replan" ||
+        c.classification === "quick-task"),
+  );
+}
+
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
 /**
@@ -235,6 +282,7 @@ function parseCapturesContent(content: string): CaptureEntry[] {
     const resolution = extractBoldField(body, "Resolution");
     const rationale = extractBoldField(body, "Rationale");
     const resolvedAt = extractBoldField(body, "Resolved");
+    const executedAt = extractBoldField(body, "Executed");
 
     if (!text || !timestamp) continue;
 
@@ -251,6 +299,7 @@ function parseCapturesContent(content: string): CaptureEntry[] {
       ...(resolution ? { resolution } : {}),
       ...(rationale ? { rationale } : {}),
       ...(resolvedAt ? { resolvedAt } : {}),
+      ...(executedAt ? { executed: true } : {}),
     });
   }
 

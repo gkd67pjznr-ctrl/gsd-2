@@ -16,7 +16,9 @@ import type { Classification, CaptureEntry } from "./captures.js";
 import {
   loadPendingCaptures,
   loadAllCaptures,
+  loadActionableCaptures,
   markCaptureResolved,
+  markCaptureExecuted,
 } from "./captures.js";
 
 // ─── Resolution Executors ─────────────────────────────────────────────────────
@@ -197,4 +199,85 @@ export function buildQuickTaskPrompt(capture: CaptureEntry): string {
     `4. Keep changes minimal and focused on the capture text.`,
     `5. When done, say: "Quick task complete."`,
   ].join("\n");
+}
+
+// ─── Post-Triage Resolution Executor ─────────────────────────────────────────
+
+/**
+ * Result of executing triage resolutions after a triage-captures unit completes.
+ */
+export interface TriageExecutionResult {
+  /** Number of inject resolutions executed (tasks added to plan) */
+  injected: number;
+  /** Number of replan triggers written */
+  replanned: number;
+  /** Captures classified as quick-task that need dispatch */
+  quickTasks: CaptureEntry[];
+  /** Details of each action taken, for logging */
+  actions: string[];
+}
+
+/**
+ * Execute pending triage resolutions.
+ *
+ * Called after a triage-captures unit completes. Reads CAPTURES.md for
+ * resolved captures that have actionable classifications (inject, replan,
+ * quick-task) but haven't been executed yet, then:
+ *
+ * - inject: calls executeInject() to add a task to the current slice plan
+ * - replan: calls executeReplan() to write the REPLAN-TRIGGER.md marker
+ * - quick-task: collects for dispatch (caller handles dispatching quick-task units)
+ *
+ * Each capture is marked as executed after its resolution action succeeds,
+ * preventing double-execution on retries or restarts.
+ */
+export function executeTriageResolutions(
+  basePath: string,
+  mid: string,
+  sid: string,
+): TriageExecutionResult {
+  const result: TriageExecutionResult = {
+    injected: 0,
+    replanned: 0,
+    quickTasks: [],
+    actions: [],
+  };
+
+  const actionable = loadActionableCaptures(basePath);
+  if (actionable.length === 0) return result;
+
+  for (const capture of actionable) {
+    switch (capture.classification) {
+      case "inject": {
+        const newTaskId = executeInject(basePath, mid, sid, capture);
+        if (newTaskId) {
+          markCaptureExecuted(basePath, capture.id);
+          result.injected++;
+          result.actions.push(`Injected ${newTaskId} from ${capture.id}: "${capture.text}"`);
+        } else {
+          result.actions.push(`Failed to inject ${capture.id}: "${capture.text}" (no plan file or parse error)`);
+        }
+        break;
+      }
+      case "replan": {
+        const success = executeReplan(basePath, mid, sid, capture);
+        if (success) {
+          markCaptureExecuted(basePath, capture.id);
+          result.replanned++;
+          result.actions.push(`Replan triggered from ${capture.id}: "${capture.text}"`);
+        } else {
+          result.actions.push(`Failed to trigger replan from ${capture.id}: "${capture.text}"`);
+        }
+        break;
+      }
+      case "quick-task": {
+        // Quick-tasks are collected for dispatch, not executed inline
+        result.quickTasks.push(capture);
+        result.actions.push(`Quick-task queued from ${capture.id}: "${capture.text}"`);
+        break;
+      }
+    }
+  }
+
+  return result;
 }

@@ -7,10 +7,10 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { appendCapture, markCaptureResolved, loadAllCaptures } from "../captures.ts";
+import { appendCapture, markCaptureResolved, markCaptureExecuted, loadAllCaptures, loadActionableCaptures } from "../captures.ts";
 // Import only the functions that don't depend on @gsd/pi-coding-agent
 // (triage-ui.ts imports next-action-ui.ts which imports the unavailable package)
-import { executeInject, executeReplan, detectFileOverlap, loadDeferredCaptures, loadReplanCaptures, buildQuickTaskPrompt } from "../triage-resolution.ts";
+import { executeInject, executeReplan, detectFileOverlap, loadDeferredCaptures, loadReplanCaptures, buildQuickTaskPrompt, executeTriageResolutions } from "../triage-resolution.ts";
 
 function makeTempDir(prefix: string): string {
   const dir = join(
@@ -212,4 +212,205 @@ test("resolution: buildQuickTaskPrompt includes capture text and ID", () => {
   assert.ok(prompt.includes("add retry logic to OAuth"), "should include capture text");
   assert.ok(prompt.includes("Quick Task"), "should have Quick Task header");
   assert.ok(prompt.includes("Do NOT modify"), "should warn about plan files");
+});
+
+// ─── markCaptureExecuted ─────────────────────────────────────────────────────
+
+test("resolution: markCaptureExecuted adds Executed field to capture", () => {
+  const tmp = makeTempDir("res-executed");
+  try {
+    const id = appendCapture(tmp, "fix the button");
+    markCaptureResolved(tmp, id, "quick-task", "execute as quick-task", "small fix");
+
+    markCaptureExecuted(tmp, id);
+
+    const all = loadAllCaptures(tmp);
+    assert.strictEqual(all.length, 1);
+    assert.strictEqual(all[0].executed, true, "should be marked as executed");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolution: markCaptureExecuted is idempotent", () => {
+  const tmp = makeTempDir("res-executed-idem");
+  try {
+    const id = appendCapture(tmp, "fix something");
+    markCaptureResolved(tmp, id, "inject", "inject task", "needed");
+
+    markCaptureExecuted(tmp, id);
+    markCaptureExecuted(tmp, id); // call again — should not duplicate
+
+    const filePath = join(tmp, ".gsd", "CAPTURES.md");
+    const content = readFileSync(filePath, "utf-8");
+    const executedMatches = content.match(/\*\*Executed:\*\*/g);
+    assert.strictEqual(executedMatches?.length, 1, "should have exactly one Executed field");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── loadActionableCaptures ──────────────────────────────────────────────────
+
+test("resolution: loadActionableCaptures returns only unexecuted actionable captures", () => {
+  const tmp = makeTempDir("res-actionable");
+  try {
+    const id1 = appendCapture(tmp, "inject this task");
+    const id2 = appendCapture(tmp, "quick fix");
+    const id3 = appendCapture(tmp, "just a note");
+    const id4 = appendCapture(tmp, "replan needed");
+    const id5 = appendCapture(tmp, "already executed inject");
+
+    markCaptureResolved(tmp, id1, "inject", "add task", "needed");
+    markCaptureResolved(tmp, id2, "quick-task", "quick fix", "small");
+    markCaptureResolved(tmp, id3, "note", "acknowledged", "info");
+    markCaptureResolved(tmp, id4, "replan", "replan triggered", "approach changed");
+    markCaptureResolved(tmp, id5, "inject", "add task", "needed");
+    markCaptureExecuted(tmp, id5); // mark as executed
+
+    const actionable = loadActionableCaptures(tmp);
+    assert.strictEqual(actionable.length, 3, "should have 3 actionable captures");
+    assert.deepStrictEqual(
+      actionable.map(c => c.id),
+      [id1, id2, id4],
+      "should include inject, quick-task, replan but not note or executed inject",
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── executeTriageResolutions ────────────────────────────────────────────────
+
+test("resolution: executeTriageResolutions executes inject captures", () => {
+  const tmp = makeTempDir("res-exec-inject");
+  try {
+    setupPlanFile(tmp, "M001", "S01", SAMPLE_PLAN);
+    const id1 = appendCapture(tmp, "add error handling");
+    const id2 = appendCapture(tmp, "add retry logic");
+    markCaptureResolved(tmp, id1, "inject", "add task", "needed");
+    markCaptureResolved(tmp, id2, "inject", "add task", "also needed");
+
+    const result = executeTriageResolutions(tmp, "M001", "S01");
+
+    assert.strictEqual(result.injected, 2, "should inject 2 tasks");
+    assert.strictEqual(result.replanned, 0);
+    assert.strictEqual(result.quickTasks.length, 0);
+
+    // Verify tasks were added to plan
+    const planPath = join(tmp, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md");
+    const planContent = readFileSync(planPath, "utf-8");
+    assert.ok(planContent.includes("**T04:"), "should have T04");
+    assert.ok(planContent.includes("**T05:"), "should have T05");
+
+    // Verify captures marked as executed
+    const all = loadAllCaptures(tmp);
+    assert.strictEqual(all[0].executed, true, "first capture should be executed");
+    assert.strictEqual(all[1].executed, true, "second capture should be executed");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolution: executeTriageResolutions executes replan captures", () => {
+  const tmp = makeTempDir("res-exec-replan");
+  try {
+    setupPlanFile(tmp, "M001", "S01", SAMPLE_PLAN);
+    const id = appendCapture(tmp, "approach is wrong");
+    markCaptureResolved(tmp, id, "replan", "replan triggered", "wrong approach");
+
+    const result = executeTriageResolutions(tmp, "M001", "S01");
+
+    assert.strictEqual(result.injected, 0);
+    assert.strictEqual(result.replanned, 1, "should trigger 1 replan");
+    assert.strictEqual(result.quickTasks.length, 0);
+
+    // Verify trigger file was written
+    const triggerPath = join(
+      tmp, ".gsd", "milestones", "M001", "slices", "S01", "S01-REPLAN-TRIGGER.md",
+    );
+    assert.ok(existsSync(triggerPath), "replan trigger should exist");
+
+    // Verify capture marked as executed
+    const all = loadAllCaptures(tmp);
+    assert.strictEqual(all[0].executed, true, "capture should be executed");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolution: executeTriageResolutions queues quick-tasks without executing inline", () => {
+  const tmp = makeTempDir("res-exec-qt");
+  try {
+    const id = appendCapture(tmp, "fix typo in readme");
+    markCaptureResolved(tmp, id, "quick-task", "execute as quick-task", "small fix");
+
+    const result = executeTriageResolutions(tmp, "M001", "S01");
+
+    assert.strictEqual(result.injected, 0);
+    assert.strictEqual(result.replanned, 0);
+    assert.strictEqual(result.quickTasks.length, 1, "should queue 1 quick-task");
+    assert.strictEqual(result.quickTasks[0].id, id);
+
+    // Quick-tasks should NOT be marked as executed yet (caller marks after dispatch)
+    const all = loadAllCaptures(tmp);
+    assert.ok(!all[0].executed, "quick-task should not be executed yet");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolution: executeTriageResolutions handles mixed classifications", () => {
+  const tmp = makeTempDir("res-exec-mixed");
+  try {
+    setupPlanFile(tmp, "M001", "S01", SAMPLE_PLAN);
+    const id1 = appendCapture(tmp, "inject a task");
+    const id2 = appendCapture(tmp, "quick fix typo");
+    const id3 = appendCapture(tmp, "just a note");
+    const id4 = appendCapture(tmp, "defer to later");
+
+    markCaptureResolved(tmp, id1, "inject", "add task", "needed");
+    markCaptureResolved(tmp, id2, "quick-task", "quick fix", "small");
+    markCaptureResolved(tmp, id3, "note", "acknowledged", "info");
+    markCaptureResolved(tmp, id4, "defer", "deferred", "later");
+
+    const result = executeTriageResolutions(tmp, "M001", "S01");
+
+    assert.strictEqual(result.injected, 1, "should inject 1 task");
+    assert.strictEqual(result.replanned, 0);
+    assert.strictEqual(result.quickTasks.length, 1, "should queue 1 quick-task");
+    assert.strictEqual(result.actions.length, 2, "should have 2 action entries (note/defer excluded)");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolution: executeTriageResolutions skips already-executed captures", () => {
+  const tmp = makeTempDir("res-exec-skip");
+  try {
+    setupPlanFile(tmp, "M001", "S01", SAMPLE_PLAN);
+    const id = appendCapture(tmp, "already done");
+    markCaptureResolved(tmp, id, "inject", "add task", "needed");
+    markCaptureExecuted(tmp, id); // already executed
+
+    const result = executeTriageResolutions(tmp, "M001", "S01");
+
+    assert.strictEqual(result.injected, 0, "should not inject again");
+    assert.strictEqual(result.actions.length, 0, "should have no actions");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolution: executeTriageResolutions returns empty result when no actionable captures", () => {
+  const tmp = makeTempDir("res-exec-empty");
+  try {
+    const result = executeTriageResolutions(tmp, "M001", "S01");
+    assert.strictEqual(result.injected, 0);
+    assert.strictEqual(result.replanned, 0);
+    assert.strictEqual(result.quickTasks.length, 0);
+    assert.strictEqual(result.actions.length, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
