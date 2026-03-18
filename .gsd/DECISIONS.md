@@ -1,0 +1,19 @@
+# Decisions Register
+
+<!-- Append-only. Never edit or remove existing rows.
+     To reverse a decision, add a new row that supersedes it.
+     Read this file at the start of any planning or research phase. -->
+
+| # | When | Scope | Decision | Choice | Rationale | Revisable? |
+|---|------|-------|----------|--------|-----------|------------|
+| D001 | M001-1ya5a3 | arch | Desktop shell framework | Electron + Vite | Chromium-based (required for Monaco, Shiki, potential future WebContainers), mature ecosystem, battle-tested for code editors (VS Code, Cursor). Electrobun considered but too young and needs CEF for Chromium. Tauri has system webview limitations. | Yes — if Electrobun matures |
+| D002 | M001-1ya5a3 | arch | Web preview approach | Localhost iframe | gsd-2 already spawns local dev servers. iframe is simpler, zero overhead, real environment. WebContainers add complexity for a local app with full filesystem access. | Yes — if sandboxing needed |
+| D003 | M001-1ya5a3 | library | Code editor | Monaco Editor (@monaco-editor/react) | Powers VS Code. Full language support, IntelliSense, diff views. Custom theming via defineTheme(). CodeMirror lighter but less out-of-box for a coding app. | No |
+| D004 | M001-1ya5a3 | library | UI primitives | Radix + Tailwind (custom components) | Headless, accessible primitives with zero visual opinions. Total design control. shadcn/ui has recognizable aesthetic that conflicts with "no AI slop" requirement. | No |
+| D005 | M001-1ya5a3 | convention | Icon set | Phosphor Icons | Minimal, geometric, consistent stroke weight. Used by Linear, Vercel. Anti-Lucide — explicitly chosen to avoid the generic AI app aesthetic. | No |
+| D006 | M001-1ya5a3 | convention | Typography | Inter (UI) + JetBrains Mono (code) | Inter has great optical sizing and tabular figures. JetBrains Mono has ligatures and clear character distinction. Both high-quality and widely respected. | No |
+| D007 | M001-1ya5a3 | convention | Color palette | Dark monochrome + warm amber/gold accent | Dark-first, terminal-inspired but refined. Single warm accent color. No purple. Monochrome grays for hierarchy. | Yes — accent color may evolve |
+| D008 | M001-1ya5a3 | convention | Message layout | Continuous document flow, left-aligned | Not chat bubbles. Not turn-based blocks. A living document that grows — more like reading a premium terminal transcript than texting. | No |
+| D009 | M001-1ya5a3 | library | Syntax highlighting (messages) | Shiki | TextMate grammar-based, accurate highlighting, theme customization. Used for code blocks in the markdown message stream. Monaco handles the editor separately. | No |
+| D010 | M001-1ya5a3 | library | State management | Zustand | Lightweight, minimal boilerplate, works well with React. No Redux overhead for a desktop app. | Yes — if state complexity grows |
+| D011 | M001-1ya5a3 | arch | Layout model | Three-column resizable | File tree (left), conversation (center), editor+preview (right). Draggable dividers. Center is primary focus. Panels collapsible. | No |
