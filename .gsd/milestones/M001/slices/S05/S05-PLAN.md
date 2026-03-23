@@ -26,6 +26,7 @@
 - `node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/resources/extensions/gsd/tests/gsd-recover.test.ts` — extended recovery tests pass (v8 column population)
 - `grep -rn 'import.*parseRoadmap\|import.*parsePlan\|import.*parseRoadmapSlices' src/resources/extensions/gsd/*.ts | grep -v '/tests/' | grep -v 'md-importer' | grep -v 'files.ts'` — returns zero module-level imports (only lazy createRequire references)
 - Regression suites: doctor.test.ts, auto-recovery.test.ts, auto-dashboard.test.ts, derive-state-db.test.ts, derive-state-crossval.test.ts, planning-crossval.test.ts, markdown-renderer.test.ts all pass
+- Diagnostic: `gsd-recover.test.ts` v8 column assertions include SQL-level queryability checks for vision, goal, files, verify columns — verifying inspectable state after migration failure or empty data
 
 ## Observability / Diagnostics
 
@@ -49,7 +50,7 @@
   - Verify: `node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/resources/extensions/gsd/tests/flag-file-db.test.ts`
   - Done when: deriveStateFromDb returns phase='replanning-slice' from DB-only data (no REPLAN.md or REPLAN-TRIGGER.md on disk) and returns phase='executing' when replan_history exists (loop protection). SCHEMA_VERSION=10.
 
-- [ ] **T02: Extend migrateHierarchyToDb with v8 column population** `est:30m`
+- [x] **T02: Extend migrateHierarchyToDb with v8 column population** `est:30m`
   - Why: Existing projects migrating to the DB need their parsed ROADMAP/PLAN data written into the v8 planning columns so DB queries return meaningful data. The `gsd recover` test must verify this.
   - Files: `src/resources/extensions/gsd/md-importer.ts`, `src/resources/extensions/gsd/tests/gsd-recover.test.ts`
   - Do: (1) In `migrateHierarchyToDb()`, extend the `insertMilestone()` call to pass `planning: { vision: roadmap.vision, successCriteria: roadmap.successCriteria, boundaryMapMarkdown: boundaryMapSection }` where `boundaryMapMarkdown` is the raw "## Boundary Map" section extracted from the roadmap content. (2) Extend `insertSlice()` calls to pass `planning: { goal: plan.goal }` from the parsed plan (when plan exists). (3) Extend `insertTask()` calls to pass `planning: { files: task.files, verify: task.verify }` from TaskPlanEntry. (4) Extend `gsd-recover.test.ts` to assert: after recover, milestone has non-empty `vision`; slice has non-empty `goal`; task has populated `files` array and `verify` string.

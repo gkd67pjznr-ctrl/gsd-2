@@ -65,3 +65,9 @@ Extend `migrateHierarchyToDb()` in `md-importer.ts` to populate v8 planning colu
 
 - `src/resources/extensions/gsd/md-importer.ts` — migrateHierarchyToDb() populates v8 planning columns
 - `src/resources/extensions/gsd/tests/gsd-recover.test.ts` — extended with v8 column population assertions
+
+## Observability Impact
+
+- **Signals changed:** After migration, `SELECT vision, success_criteria, boundary_map_markdown FROM milestones WHERE id = :mid` returns non-empty values for pre-M002 projects (previously all empty). `SELECT goal FROM slices` and `SELECT files, verify FROM tasks` similarly populated.
+- **Inspection:** `getMilestone(id).vision`, `getSlice(mid, sid).goal`, `getTask(mid, sid, tid).files/verify` return meaningful data post-recovery.
+- **Failure visibility:** If `parseRoadmap()` or `parsePlan()` returns empty fields (no Vision in markdown, no Goal in plan), planning columns remain empty — detectable by `SELECT COUNT(*) FROM milestones WHERE vision = ''`.
