@@ -80,15 +80,13 @@ Apply these when decomposing and ordering slices:
 
 ## Single-Slice Fast Path
 
-If the roadmap has only one slice, also write the slice plan and task plans inline during this unit — don't leave them for a separate planning session.
+If the roadmap has only one slice, also plan the slice and its tasks inline during this unit — don't leave them for a separate planning session.
 
-1. Use the **Slice Plan** and **Task Plan** output templates from the inlined context above
-2. `mkdir -p {{milestonePath}}/slices/S01/tasks`
-3. Write the S01 plan file at `{{milestonePath}}/slices/S01/S01-PLAN.md`
-4. Write individual task plans at `{{milestonePath}}/slices/S01/tasks/T01-PLAN.md`, etc.
-5. For simple slices, keep the plan lean — omit Proof Level, Integration Closure, and Observability sections if they would all be "none". Executable verification commands are sufficient.
+1. After `gsd_plan_milestone` returns, immediately call `gsd_plan_slice` for S01 with the full task breakdown
+2. Use the **Slice Plan** and **Task Plan** output templates from the inlined context above to structure the tool call parameters
+3. For simple slices, keep the plan lean — omit Proof Level, Integration Closure, and Observability sections if they would all be "none". Executable verification commands are sufficient.
 
-This eliminates a separate research-slice + plan-slice cycle when the work is straightforward.
+Do **not** write plan files manually — use the DB-backed tools so state stays consistent.
 
 ## Secret Forecasting
 

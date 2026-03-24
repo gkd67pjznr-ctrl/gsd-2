@@ -5,6 +5,7 @@ import {
   insertTask,
   upsertSlicePlanning,
   upsertTaskPlanning,
+  _getAdapter,
 } from "../gsd-db.js";
 import { invalidateStateCache } from "../state.js";
 import { renderPlanFromDb } from "../markdown-renderer.js";
@@ -183,7 +184,11 @@ export async function handlePlanSlice(
       planPath: renderResult.planPath,
       taskPlanPaths: renderResult.taskPlanPaths,
     };
-  } catch (err) {
-    return { error: `render failed: ${(err as Error).message}` };
+  } catch (renderErr) {
+    process.stderr.write(
+      `gsd-db: plan_slice — render failed (DB rows preserved for debugging): ${(renderErr as Error).message}\n`,
+    );
+    invalidateStateCache();
+    return { error: `render failed: ${(renderErr as Error).message}` };
   }
 }

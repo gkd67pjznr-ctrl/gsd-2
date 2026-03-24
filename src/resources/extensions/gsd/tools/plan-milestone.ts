@@ -5,6 +5,7 @@ import {
   insertSlice,
   upsertMilestonePlanning,
   upsertSlicePlanning,
+  _getAdapter,
 } from "../gsd-db.js";
 import { invalidateStateCache } from "../state.js";
 import { renderRoadmapFromDb } from "../markdown-renderer.js";
@@ -230,8 +231,12 @@ export async function handlePlanMilestone(
   try {
     const renderResult = await renderRoadmapFromDb(basePath, params.milestoneId);
     roadmapPath = renderResult.roadmapPath;
-  } catch (err) {
-    return { error: `render failed: ${(err as Error).message}` };
+  } catch (renderErr) {
+    process.stderr.write(
+      `gsd-db: plan_milestone — render failed (DB rows preserved for debugging): ${(renderErr as Error).message}\n`,
+    );
+    invalidateStateCache();
+    return { error: `render failed: ${(renderErr as Error).message}` };
   }
 
   invalidateStateCache();
